@@ -21,6 +21,7 @@ export type ConversationStep =
   | "idle"
   | "browsing_menu"
   | "selecting_items"
+  | "selecting_item_options"
   | "choosing_fulfillment"
   | "collecting_address"
   | "collecting_pickup_time"
@@ -33,6 +34,19 @@ export type MenuCategory = {
   sortOrder: number;
 };
 
+export type MenuOptionChoice = {
+  id: string;
+  label: string;
+  priceDeltaCents: number;
+};
+
+export type MenuOptionGroup = {
+  id: string;
+  name: string;
+  required: boolean;
+  choices: MenuOptionChoice[];
+};
+
 export type MenuItem = {
   id: string;
   categoryId: string;
@@ -41,8 +55,15 @@ export type MenuItem = {
   priceCents: number;
   available: boolean;
   prepMinutes: number;
-  modifiers: string[];
+  optionGroups: MenuOptionGroup[];
   imageUrl?: string;
+};
+
+export type SelectedOption = {
+  groupId: string;
+  choiceId: string;
+  label: string;
+  priceDeltaCents: number;
 };
 
 export type CartLine = {
@@ -50,7 +71,27 @@ export type CartLine = {
   name: string;
   quantity: number;
   unitPriceCents: number;
+  lineKey: string;
+  selectedOptions: SelectedOption[];
   notes?: string;
+};
+
+export type CheckoutDraft = {
+  fulfillmentType: FulfillmentType;
+  deliveryAddress?: string;
+  pickupTime?: string;
+};
+
+export type PendingItemSelection = {
+  menuItemId: string;
+  quantity: number;
+  groupIndex: number;
+  selectedOptions: SelectedOption[];
+};
+
+export type ConversationContext = {
+  checkoutDraft?: CheckoutDraft;
+  pendingItem?: PendingItemSelection;
 };
 
 export type Customer = {
@@ -67,6 +108,7 @@ export type Conversation = {
   step: ConversationStep;
   activeCategoryId?: string;
   shownItemIds: string[];
+  context: ConversationContext;
   createdAt: string;
   updatedAt: string;
 };

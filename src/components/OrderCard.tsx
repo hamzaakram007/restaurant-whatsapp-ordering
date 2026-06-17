@@ -42,10 +42,17 @@ export function OrderCard({
         <OrderStatusBadge status={order.status} />
       </div>
 
-      <ul className="mb-4 space-y-1 text-sm text-stone-700">
+      <ul className="mb-4 space-y-2 text-sm text-stone-700">
         {order.items.map((item) => (
-          <li key={`${order.id}-${item.menuItemId}`}>
-            {item.name} x{item.quantity}
+          <li key={`${order.id}-${item.lineKey ?? item.menuItemId}`}>
+            <div>
+              {item.name} x{item.quantity}
+            </div>
+            {item.selectedOptions?.length ? (
+              <p className="text-xs text-stone-500">
+                {item.selectedOptions.map((option) => option.label).join(" · ")}
+              </p>
+            ) : null}
           </li>
         ))}
       </ul>
@@ -67,7 +74,7 @@ export function OrderCard({
 
       {order.paymentScreenshotUrl ? (
         <a
-          href={order.paymentScreenshotUrl}
+          href={`/api/orders/${order.id}/payment-screenshot`}
           target="_blank"
           rel="noreferrer"
           className="mb-4 inline-block text-sm font-medium text-amber-700 underline"

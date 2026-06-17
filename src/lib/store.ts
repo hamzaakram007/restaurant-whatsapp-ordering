@@ -42,6 +42,10 @@ export async function getMenuItems(categoryId?: string) {
   return usePostgres() ? postgres.getMenuItems(categoryId) : memory.getMenuItems(categoryId);
 }
 
+export async function getAllMenuItems(categoryId?: string) {
+  return usePostgres() ? postgres.getAllMenuItems(categoryId) : memory.getAllMenuItems(categoryId);
+}
+
 export async function getMenuItemById(id: string) {
   return usePostgres() ? postgres.getMenuItemById(id) : memory.getMenuItemById(id);
 }
@@ -67,6 +71,21 @@ export async function updateConversation(
   return usePostgres()
     ? postgres.updateConversation(phone, patch)
     : memory.updateConversation(phone, patch);
+}
+
+export async function getConversationContext(phone: string) {
+  return usePostgres()
+    ? postgres.getConversationContext(phone)
+    : memory.getConversationContext(phone);
+}
+
+export async function setConversationContext(
+  phone: string,
+  context: Parameters<typeof memory.setConversationContext>[1],
+) {
+  return usePostgres()
+    ? postgres.setConversationContext(phone, context)
+    : memory.setConversationContext(phone, context);
 }
 
 export async function getCart(phone: string) {

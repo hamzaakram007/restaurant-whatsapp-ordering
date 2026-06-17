@@ -20,6 +20,7 @@ Open `http://localhost:3000` and click **Start WhatsApp Demo**.
 | Counter | `/dashboard` |
 | Kitchen | `/kitchen` |
 | Menu admin | `/admin/menu` |
+| Twilio setup | `/admin/twilio` |
 
 ## Database (Neon Postgres)
 
@@ -49,7 +50,7 @@ npm run verify:deploy
 
 ## Docs
 
-- [CLIENT_DEMO.md](docs/CLIENT_DEMO.md) — client presentation script
+- [CLIENT_TWILIO_DEMO.md](docs/CLIENT_TWILIO_DEMO.md) — live WhatsApp demo runbook
 - [DATABASE_SETUP.md](docs/DATABASE_SETUP.md) — Neon setup
 - [TWILIO_SETUP.md](docs/TWILIO_SETUP.md) — WhatsApp connection
 - [ORDER_STATES.md](docs/ORDER_STATES.md) — state machine

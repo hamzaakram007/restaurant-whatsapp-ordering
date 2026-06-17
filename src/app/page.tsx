@@ -54,7 +54,16 @@ export default function HomePage() {
           >
             <h2 className="text-xl font-semibold">Menu Admin</h2>
             <p className="mt-2 text-sm text-stone-600">
-              Add categories, prices, and availability for the WhatsApp menu bot.
+              Manage items, sizes, add-ons, and availability for the WhatsApp menu bot.
+            </p>
+          </Link>
+          <Link
+            href="/admin/twilio"
+            className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm transition hover:border-amber-300"
+          >
+            <h2 className="text-xl font-semibold">Twilio Setup</h2>
+            <p className="mt-2 text-sm text-stone-600">
+              Webhook URLs and checklist for connecting real WhatsApp before the client demo.
             </p>
           </Link>
         </section>

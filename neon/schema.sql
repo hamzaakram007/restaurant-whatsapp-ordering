@@ -22,7 +22,7 @@ create table if not exists menu_items (
   price_cents integer not null check (price_cents > 0),
   available boolean not null default true,
   prep_minutes integer not null default 10,
-  modifiers text[] not null default '{}',
+  option_groups jsonb not null default '[]',
   image_url text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -34,6 +34,7 @@ create table if not exists conversations (
   step text not null default 'idle',
   active_category_id text,
   shown_item_ids text[] not null default '{}',
+  context jsonb not null default '{}',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -74,6 +75,7 @@ create table if not exists order_items (
   name text not null,
   quantity integer not null check (quantity > 0),
   unit_price_cents integer not null check (unit_price_cents > 0),
+  selected_options jsonb not null default '[]',
   notes text
 );
 

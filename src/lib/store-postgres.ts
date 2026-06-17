@@ -9,15 +9,18 @@ import { getSql } from "@/lib/db";
 import type {
   CartLine,
   Conversation,
+  ConversationContext,
   ConversationStep,
   Customer,
   FulfillmentType,
   MenuCategory,
   MenuItem,
+  MenuOptionGroup,
   Order,
   OrderEvent,
   OrderStatus,
   PaymentStatus,
+  SelectedOption,
 } from "@/lib/types";
 
 const now = () => new Date().toISOString();
@@ -50,15 +53,49 @@ type ItemRow = {
   name: string;
   quantity: number;
   unit_price_cents: number;
+  selected_options: SelectedOption[] | null;
   notes: string | null;
 };
 
+function mapMenuItemRow(row: Record<string, unknown>): MenuItem {
+  return {
+    id: row.id as string,
+    categoryId: row.category_id as string,
+    name: row.name as string,
+    description: row.description as string,
+    priceCents: row.price_cents as number,
+    available: row.available as boolean,
+    prepMinutes: row.prep_minutes as number,
+    optionGroups: (row.option_groups as MenuOptionGroup[]) ?? [],
+    imageUrl: (row.image_url as string | null) ?? undefined,
+  };
+}
+
+function mapConversationRow(row: Record<string, unknown>): Conversation {
+  return {
+    id: row.id as string,
+    customerPhone: row.customer_phone as string,
+    step: row.step as ConversationStep,
+    activeCategoryId: (row.active_category_id as string | null) ?? undefined,
+    shownItemIds: (row.shown_item_ids as string[]) ?? [],
+    context: (row.context as ConversationContext) ?? {},
+    createdAt: row.created_at as string,
+    updatedAt: row.updated_at as string,
+  };
+}
+
 function mapItem(row: ItemRow): CartLine {
+  const selectedOptions = row.selected_options ?? [];
   return {
     menuItemId: row.menu_item_id,
     name: row.name,
     quantity: row.quantity,
     unitPriceCents: row.unit_price_cents,
+    lineKey:
+      selectedOptions.length > 0
+        ? `${row.menu_item_id}:${[...selectedOptions.map((option) => option.choiceId)].sort().join(":")}`
+        : row.menu_item_id,
+    selectedOptions,
     notes: row.notes ?? undefined,
   };
 }
@@ -92,11 +129,16 @@ function mapOrder(row: OrderRow, items: CartLine[]): Order {
 async function loadOrderItems(orderId: string) {
   const sql = getSql();
   const rows = await sql`
-    select menu_item_id, name, quantity, unit_price_cents, notes
+    select menu_item_id, name, quantity, unit_price_cents, selected_options, notes
     from order_items
     where order_id = ${orderId}
   `;
-  return rows.map((row) => mapItem(row as ItemRow));
+  return rows.map((row) =>
+    mapItem({
+      ...(row as ItemRow),
+      selected_options: (row.selected_options as SelectedOption[] | null) ?? [],
+    }),
+  );
 }
 
 async function loadOrder(row: OrderRow) {
@@ -120,7 +162,7 @@ async function ensureMenuSeeded() {
   for (const item of seedMenuItems) {
     await sql`
       insert into menu_items (
-        id, category_id, name, description, price_cents, available, prep_minutes, modifiers, updated_at
+        id, category_id, name, description, price_cents, available, prep_minutes, option_groups, updated_at
       ) values (
         ${item.id},
         ${item.categoryId},
@@ -129,7 +171,7 @@ async function ensureMenuSeeded() {
         ${item.priceCents},
         ${item.available},
         ${item.prepMinutes},
-        ${item.modifiers},
+        ${JSON.stringify(item.optionGroups)}::jsonb,
         ${now()}
       )
       on conflict (id) do nothing
@@ -197,8 +239,16 @@ export async function resetDemoData() {
 
     for (const item of order.items) {
       await sql`
-        insert into order_items (order_id, menu_item_id, name, quantity, unit_price_cents, notes)
-        values (${order.id}, ${item.menuItemId}, ${item.name}, ${item.quantity}, ${item.unitPriceCents}, ${item.notes ?? null})
+        insert into order_items (order_id, menu_item_id, name, quantity, unit_price_cents, selected_options, notes)
+        values (
+          ${order.id},
+          ${item.menuItemId},
+          ${item.name},
+          ${item.quantity},
+          ${item.unitPriceCents},
+          ${JSON.stringify(item.selectedOptions ?? [])}::jsonb,
+          ${item.notes ?? null}
+        )
       `;
     }
   }
@@ -267,44 +317,73 @@ export async function getMenuItems(categoryId?: string) {
   const sql = getSql();
   const rows = categoryId
     ? await sql`
-        select id, category_id, name, description, price_cents, available, prep_minutes, modifiers, image_url
+        select id, category_id, name, description, price_cents, available, prep_minutes, option_groups, image_url
         from menu_items
         where available = true and category_id = ${categoryId}
         order by name asc
       `
     : await sql`
-        select id, category_id, name, description, price_cents, available, prep_minutes, modifiers, image_url
+        select id, category_id, name, description, price_cents, available, prep_minutes, option_groups, image_url
         from menu_items
         where available = true
         order by name asc
       `;
 
-  return rows.map(
-    (row) =>
-      ({
-        id: row.id as string,
-        categoryId: row.category_id as string,
-        name: row.name as string,
-        description: row.description as string,
-        priceCents: row.price_cents as number,
-        available: row.available as boolean,
-        prepMinutes: row.prep_minutes as number,
-        modifiers: row.modifiers as string[],
-        imageUrl: (row.image_url as string | null) ?? undefined,
-      }) satisfies MenuItem,
-  );
+  return rows.map((row) => mapMenuItemRow(row as Record<string, unknown>));
+}
+
+export async function getAllMenuItems(categoryId?: string) {
+  await ensureMenuSeeded();
+  const sql = getSql();
+  const rows = categoryId
+    ? await sql`
+        select id, category_id, name, description, price_cents, available, prep_minutes, option_groups, image_url
+        from menu_items
+        where category_id = ${categoryId}
+        order by name asc
+      `
+    : await sql`
+        select id, category_id, name, description, price_cents, available, prep_minutes, option_groups, image_url
+        from menu_items
+        order by name asc
+      `;
+
+  return rows.map((row) => mapMenuItemRow(row as Record<string, unknown>));
 }
 
 export async function getMenuItemById(id: string) {
-  const items = await getMenuItems();
-  return items.find((item) => item.id === id);
+  await ensureMenuSeeded();
+  const sql = getSql();
+  const rows = await sql`
+    select id, category_id, name, description, price_cents, available, prep_minutes, option_groups, image_url
+    from menu_items
+    where id = ${id}
+    limit 1
+  `;
+  if (!rows[0]) return undefined;
+  const item = mapMenuItemRow(rows[0] as Record<string, unknown>);
+  if (!item.available) return undefined;
+  return item;
+}
+
+export async function getMenuItemByIdAdmin(id: string) {
+  await ensureMenuSeeded();
+  const sql = getSql();
+  const rows = await sql`
+    select id, category_id, name, description, price_cents, available, prep_minutes, option_groups, image_url
+    from menu_items
+    where id = ${id}
+    limit 1
+  `;
+  if (!rows[0]) return undefined;
+  return mapMenuItemRow(rows[0] as Record<string, unknown>);
 }
 
 export async function upsertMenuItem(item: MenuItem) {
   const sql = getSql();
   await sql`
     insert into menu_items (
-      id, category_id, name, description, price_cents, available, prep_minutes, modifiers, image_url, updated_at
+      id, category_id, name, description, price_cents, available, prep_minutes, option_groups, image_url, updated_at
     ) values (
       ${item.id},
       ${item.categoryId},
@@ -313,7 +392,7 @@ export async function upsertMenuItem(item: MenuItem) {
       ${item.priceCents},
       ${item.available},
       ${item.prepMinutes},
-      ${item.modifiers},
+      ${JSON.stringify(item.optionGroups)}::jsonb,
       ${item.imageUrl ?? null},
       ${now()}
     )
@@ -324,7 +403,7 @@ export async function upsertMenuItem(item: MenuItem) {
       price_cents = excluded.price_cents,
       available = excluded.available,
       prep_minutes = excluded.prep_minutes,
-      modifiers = excluded.modifiers,
+      option_groups = excluded.option_groups,
       image_url = excluded.image_url,
       updated_at = excluded.updated_at
   `;
@@ -357,68 +436,55 @@ export async function getOrCreateCustomer(phone: string): Promise<Customer> {
 export async function getOrCreateConversation(phone: string): Promise<Conversation> {
   const sql = getSql();
   const existing = await sql`
-    select id, customer_phone, step, active_category_id, shown_item_ids, created_at, updated_at
+    select id, customer_phone, step, active_category_id, shown_item_ids, context, created_at, updated_at
     from conversations
     where customer_phone = ${phone}
     limit 1
   `;
 
   if (existing[0]) {
-    const row = existing[0];
-    return {
-      id: row.id as string,
-      customerPhone: row.customer_phone as string,
-      step: row.step as ConversationStep,
-      activeCategoryId: (row.active_category_id as string | null) ?? undefined,
-      shownItemIds: (row.shown_item_ids as string[]) ?? [],
-      createdAt: row.created_at as string,
-      updatedAt: row.updated_at as string,
-    };
+    return mapConversationRow(existing[0] as Record<string, unknown>);
   }
 
   const rows = await sql`
-    insert into conversations (customer_phone, step, shown_item_ids, created_at, updated_at)
-    values (${phone}, 'idle', ${[]}, ${now()}, ${now()})
-    returning id, customer_phone, step, active_category_id, shown_item_ids, created_at, updated_at
+    insert into conversations (customer_phone, step, shown_item_ids, context, created_at, updated_at)
+    values (${phone}, 'idle', ${[]}, ${JSON.stringify({})}::jsonb, ${now()}, ${now()})
+    returning id, customer_phone, step, active_category_id, shown_item_ids, context, created_at, updated_at
   `;
-  const row = rows[0];
-  return {
-    id: row.id as string,
-    customerPhone: row.customer_phone as string,
-    step: row.step as ConversationStep,
-    activeCategoryId: (row.active_category_id as string | null) ?? undefined,
-    shownItemIds: (row.shown_item_ids as string[]) ?? [],
-    createdAt: row.created_at as string,
-    updatedAt: row.updated_at as string,
-  };
+  return mapConversationRow(rows[0] as Record<string, unknown>);
 }
 
 export async function updateConversation(
   phone: string,
-  patch: Partial<Pick<Conversation, "step" | "activeCategoryId" | "shownItemIds">>,
+  patch: Partial<
+    Pick<Conversation, "step" | "activeCategoryId" | "shownItemIds" | "context">
+  >,
 ) {
   const conversation = await getOrCreateConversation(phone);
   const sql = getSql();
+  const nextContext = patch.context
+    ? { ...conversation.context, ...patch.context }
+    : conversation.context;
   const rows = await sql`
     update conversations
     set
       step = ${patch.step ?? conversation.step},
       active_category_id = ${patch.activeCategoryId ?? conversation.activeCategoryId ?? null},
       shown_item_ids = ${patch.shownItemIds ?? conversation.shownItemIds},
+      context = ${JSON.stringify(nextContext)}::jsonb,
       updated_at = ${now()}
     where customer_phone = ${phone}
-    returning id, customer_phone, step, active_category_id, shown_item_ids, created_at, updated_at
+    returning id, customer_phone, step, active_category_id, shown_item_ids, context, created_at, updated_at
   `;
-  const row = rows[0];
-  return {
-    id: row.id as string,
-    customerPhone: row.customer_phone as string,
-    step: row.step as ConversationStep,
-    activeCategoryId: (row.active_category_id as string | null) ?? undefined,
-    shownItemIds: (row.shown_item_ids as string[]) ?? [],
-    createdAt: row.created_at as string,
-    updatedAt: row.updated_at as string,
-  };
+  return mapConversationRow(rows[0] as Record<string, unknown>);
+}
+
+export async function getConversationContext(phone: string) {
+  return (await getOrCreateConversation(phone)).context;
+}
+
+export async function setConversationContext(phone: string, context: ConversationContext) {
+  return updateConversation(phone, { context });
 }
 
 export async function getCart(phone: string): Promise<CartLine[]> {
@@ -441,12 +507,17 @@ export async function setCart(phone: string, items: CartLine[]) {
 
 export async function addToCart(phone: string, line: CartLine) {
   const cart = await getCart(phone);
-  const existing = cart.find((item) => item.menuItemId === line.menuItemId);
+  const lineKey = line.lineKey ?? line.menuItemId;
+  const existing = cart.find((item) => (item.lineKey ?? item.menuItemId) === lineKey);
   if (existing) {
     existing.quantity += line.quantity;
     if (line.notes) existing.notes = line.notes;
   } else {
-    cart.push(line);
+    cart.push({
+      ...line,
+      lineKey,
+      selectedOptions: line.selectedOptions ?? [],
+    });
   }
   return setCart(phone, cart);
 }
@@ -541,8 +612,16 @@ export async function createOrderFromCart(input: {
 
   for (const item of cart) {
     await sql`
-      insert into order_items (order_id, menu_item_id, name, quantity, unit_price_cents, notes)
-      values (${orderId}, ${item.menuItemId}, ${item.name}, ${item.quantity}, ${item.unitPriceCents}, ${item.notes ?? null})
+      insert into order_items (order_id, menu_item_id, name, quantity, unit_price_cents, selected_options, notes)
+      values (
+        ${orderId},
+        ${item.menuItemId},
+        ${item.name},
+        ${item.quantity},
+        ${item.unitPriceCents},
+        ${JSON.stringify(item.selectedOptions ?? [])}::jsonb,
+        ${item.notes ?? null}
+      )
     `;
   }
 

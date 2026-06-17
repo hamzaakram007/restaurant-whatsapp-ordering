@@ -36,7 +36,7 @@ Method: `POST`
 4. Optional status callback:
 
 ```text
-https://your-app.vercel.app/api/twilio/whatsapp/status
+https://your-app.vercel.app/api/twilio/status
 ```
 
 5. Verify webhook info:

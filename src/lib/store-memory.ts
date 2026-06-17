@@ -8,6 +8,7 @@ import { seedCategories, seedMenuItems } from "@/data/seed-menu";
 import type {
   CartLine,
   Conversation,
+  ConversationContext,
   ConversationStep,
   Customer,
   FulfillmentType,
@@ -17,6 +18,7 @@ import type {
   OrderEvent,
   OrderStatus,
   PaymentStatus,
+  SelectedOption,
 } from "@/lib/types";
 
 type StoreState = {
@@ -127,6 +129,12 @@ export function getMenuItems(categoryId?: string) {
   return items.filter((item) => item.categoryId === categoryId);
 }
 
+export function getAllMenuItems(categoryId?: string) {
+  const items = getStore().menuItems;
+  if (!categoryId) return items;
+  return items.filter((item) => item.categoryId === categoryId);
+}
+
 export function getMenuItemById(id: string) {
   return getStore().menuItems.find((item) => item.id === id);
 }
@@ -168,6 +176,7 @@ export function getOrCreateConversation(phone: string): Conversation {
     customerPhone: phone,
     step: "idle",
     shownItemIds: [],
+    context: {},
     createdAt: now(),
     updatedAt: now(),
   };
@@ -177,11 +186,28 @@ export function getOrCreateConversation(phone: string): Conversation {
 
 export function updateConversation(
   phone: string,
-  patch: Partial<Pick<Conversation, "step" | "activeCategoryId" | "shownItemIds">>,
+  patch: Partial<
+    Pick<Conversation, "step" | "activeCategoryId" | "shownItemIds" | "context">
+  >,
 ) {
   const conversation = getOrCreateConversation(phone);
-  Object.assign(conversation, patch, { updatedAt: now() });
+  if (patch.context) {
+    conversation.context = { ...conversation.context, ...patch.context };
+  }
+  Object.assign(conversation, {
+    ...patch,
+    context: conversation.context,
+    updatedAt: now(),
+  });
   return conversation;
+}
+
+export function getConversationContext(phone: string): ConversationContext {
+  return getOrCreateConversation(phone).context;
+}
+
+export function setConversationContext(phone: string, context: ConversationContext) {
+  return updateConversation(phone, { context });
 }
 
 export function getCart(phone: string): CartLine[] {
@@ -194,12 +220,17 @@ export function setCart(phone: string, items: CartLine[]) {
 
 export function addToCart(phone: string, line: CartLine) {
   const cart = getCart(phone);
-  const existing = cart.find((item) => item.menuItemId === line.menuItemId);
+  const lineKey = line.lineKey ?? line.menuItemId;
+  const existing = cart.find((item) => (item.lineKey ?? item.menuItemId) === lineKey);
   if (existing) {
     existing.quantity += line.quantity;
     if (line.notes) existing.notes = line.notes;
   } else {
-    cart.push(line);
+    cart.push({
+      ...line,
+      lineKey,
+      selectedOptions: line.selectedOptions ?? [],
+    });
   }
   setCart(phone, cart);
   return cart;

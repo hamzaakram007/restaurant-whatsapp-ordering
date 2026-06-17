@@ -1,6 +1,13 @@
 import { restaurantConfig } from "@/data/restaurant-config";
 import { formatMoney, formatOrderNumber } from "@/lib/format";
 import {
+  buildLineKey,
+  computeUnitPrice,
+  formatCartLineName,
+  formatOptionGroupPrompt,
+  getPromptableGroups,
+} from "@/lib/menu-options";
+import {
   addToCart,
   createOrderFromCart,
   ensureStoreReady,
@@ -12,11 +19,19 @@ import {
   getMenuItems,
   getOrCreateConversation,
   getOrCreateCustomer,
+  setConversationContext,
   setConversationStep,
   updateConversation,
   updateOrder,
 } from "@/lib/store";
-import type { BotResult, FulfillmentType } from "@/lib/types";
+import type {
+  BotResult,
+  CheckoutDraft,
+  FulfillmentType,
+  MenuItem,
+  PendingItemSelection,
+  SelectedOption,
+} from "@/lib/types";
 
 type InboundInput = {
   customerPhone: string;
@@ -46,6 +61,35 @@ function isNo(text: string) {
   return /^(no|n|cancel|stop|back)/i.test(text);
 }
 
+function isSkip(text: string) {
+  return /^(skip|none|no thanks|next)/i.test(text);
+}
+
+async function getDraft(phone: string): Promise<CheckoutDraft | undefined> {
+  const conversation = await getOrCreateConversation(phone);
+  return conversation.context.checkoutDraft;
+}
+
+async function setDraft(phone: string, draft: CheckoutDraft) {
+  const conversation = await getOrCreateConversation(phone);
+  await setConversationContext(phone, {
+    ...conversation.context,
+    checkoutDraft: draft,
+  });
+}
+
+async function clearDraft(phone: string) {
+  const conversation = await getOrCreateConversation(phone);
+  const { checkoutDraft: _removed, ...rest } = conversation.context;
+  await setConversationContext(phone, rest);
+}
+
+async function clearPendingItem(phone: string) {
+  const conversation = await getOrCreateConversation(phone);
+  const { pendingItem: _removed, ...rest } = conversation.context;
+  await setConversationContext(phone, rest);
+}
+
 async function formatMenuCategories() {
   const categories = await getCategories();
   const lines = categories.map(
@@ -62,6 +106,21 @@ async function formatMenuCategories() {
   ].join("\n");
 }
 
+function formatItemPriceHint(item: MenuItem) {
+  const groups = getPromptableGroups(item);
+  if (groups.length === 0) {
+    return formatMoney(item.priceCents);
+  }
+  const maxDelta = groups.reduce((sum, group) => {
+    const maxInGroup = Math.max(...group.choices.map((choice) => choice.priceDeltaCents), 0);
+    return sum + maxInGroup;
+  }, 0);
+  if (maxDelta === 0) {
+    return `from ${formatMoney(item.priceCents)}`;
+  }
+  return `from ${formatMoney(item.priceCents)}`;
+}
+
 async function formatCategoryItems(categoryId: string) {
   const items = await getMenuItems(categoryId);
   if (items.length === 0) {
@@ -70,12 +129,13 @@ async function formatCategoryItems(categoryId: string) {
 
   const lines = items.map(
     (item, index) =>
-      `${index + 1}. ${item.name} - ${formatMoney(item.priceCents)}\n   ${item.description}`,
+      `${index + 1}. ${item.name} - ${formatItemPriceHint(item)}\n   ${item.description}`,
   );
 
   return [
     "Add items by replying with: <number> or <number>x<qty>",
     "Example: 1x2 adds two of item 1",
+    "Items with sizes or add-ons will ask follow-up questions.",
     "",
     ...lines,
     "",
@@ -175,6 +235,51 @@ async function parseItemSelection(text: string, shownItemIds: string[]) {
   return { menuItem, quantity };
 }
 
+async function finalizePendingItem(phone: string, pending: PendingItemSelection) {
+  const menuItem = await getMenuItemById(pending.menuItemId);
+  if (!menuItem) {
+    await clearPendingItem(phone);
+    await setConversationStep(phone, "selecting_items");
+    return reply("That item is no longer available. Reply menu to browse again.");
+  }
+
+  const unitPriceCents = computeUnitPrice(menuItem.priceCents, pending.selectedOptions);
+  const name = formatCartLineName(menuItem.name, pending.selectedOptions);
+  const lineKey = buildLineKey(menuItem.id, pending.selectedOptions);
+
+  await addToCart(phone, {
+    menuItemId: menuItem.id,
+    name,
+    quantity: pending.quantity,
+    unitPriceCents,
+    lineKey,
+    selectedOptions: pending.selectedOptions,
+  });
+
+  await clearPendingItem(phone);
+  await setConversationStep(phone, "selecting_items");
+
+  return reply([`Added ${name} x${pending.quantity}.`, await formatCartSummary(phone)]);
+}
+
+async function startItemOptionFlow(phone: string, menuItem: MenuItem, quantity: number) {
+  const groups = getPromptableGroups(menuItem);
+  const pending: PendingItemSelection = {
+    menuItemId: menuItem.id,
+    quantity,
+    groupIndex: 0,
+    selectedOptions: [],
+  };
+
+  await setConversationContext(phone, {
+    ...(await getOrCreateConversation(phone)).context,
+    pendingItem: pending,
+  });
+  await setConversationStep(phone, "selecting_item_options");
+
+  return reply(formatOptionGroupPrompt(groups[0], menuItem.name));
+}
+
 async function handlePaymentScreenshot(input: InboundInput): Promise<BotResult> {
   const order = await findActiveOrderByPhone(input.customerPhone);
   if (!order || order.status !== "awaiting_payment") {
@@ -261,37 +366,9 @@ async function handleFulfillmentChoice(phone: string, text: string): Promise<Bot
   return reply("Reply 1 for delivery or 2 for takeaway.");
 }
 
-const draftByPhone = new Map<
-  string,
-  {
-    fulfillmentType: FulfillmentType;
-    deliveryAddress?: string;
-    pickupTime?: string;
-  }
->();
-
-function getDraft(phone: string) {
-  return draftByPhone.get(phone);
-}
-
-function setDraft(
-  phone: string,
-  draft: {
-    fulfillmentType: FulfillmentType;
-    deliveryAddress?: string;
-    pickupTime?: string;
-  },
-) {
-  draftByPhone.set(phone, draft);
-}
-
-function clearDraft(phone: string) {
-  draftByPhone.delete(phone);
-}
-
 async function handleOrderConfirmation(phone: string, text: string): Promise<BotResult> {
   if (isNo(text)) {
-    clearDraft(phone);
+    await clearDraft(phone);
     await setConversationStep(phone, "selecting_items");
     return reply("Order cancelled. Reply menu to continue shopping.");
   }
@@ -300,7 +377,7 @@ async function handleOrderConfirmation(phone: string, text: string): Promise<Bot
     return reply("Reply YES to confirm your order or NO to cancel.");
   }
 
-  const draft = getDraft(phone);
+  const draft = await getDraft(phone);
   if (!draft) {
     await setConversationStep(phone, "idle");
     return reply("Something went wrong. Reply checkout to try again.");
@@ -314,7 +391,7 @@ async function handleOrderConfirmation(phone: string, text: string): Promise<Bot
     deliveryFeeCents: restaurantConfig.deliveryFeeCents,
   });
 
-  clearDraft(phone);
+  await clearDraft(phone);
   await setConversationStep(phone, "awaiting_payment_screenshot");
 
   return reply([
@@ -350,11 +427,18 @@ async function handleItemSelection(phone: string, text: string): Promise<BotResu
     );
   }
 
+  const groups = getPromptableGroups(parsed.menuItem);
+  if (groups.length > 0) {
+    return startItemOptionFlow(phone, parsed.menuItem, parsed.quantity);
+  }
+
   await addToCart(phone, {
     menuItemId: parsed.menuItem.id,
     name: parsed.menuItem.name,
     quantity: parsed.quantity,
     unitPriceCents: parsed.menuItem.priceCents,
+    lineKey: parsed.menuItem.id,
+    selectedOptions: [],
   });
 
   return reply([
@@ -363,16 +447,101 @@ async function handleItemSelection(phone: string, text: string): Promise<BotResu
   ]);
 }
 
+async function handleItemOptionSelection(phone: string, text: string): Promise<BotResult> {
+  const conversation = await getOrCreateConversation(phone);
+  const pending = conversation.context.pendingItem;
+  if (!pending) {
+    await setConversationStep(phone, "selecting_items");
+    return reply("No item is waiting for options. Reply with an item number to add.");
+  }
+
+  const menuItem = await getMenuItemById(pending.menuItemId);
+  if (!menuItem) {
+    await clearPendingItem(phone);
+    await setConversationStep(phone, "selecting_items");
+    return reply("That item is no longer available. Reply menu to browse again.");
+  }
+
+  const groups = getPromptableGroups(menuItem);
+  const currentGroup = groups[pending.groupIndex];
+  if (!currentGroup) {
+    return finalizePendingItem(phone, pending);
+  }
+
+  if (text === "menu") {
+    await clearPendingItem(phone);
+    await setConversationStep(phone, "browsing_menu");
+    return reply(await formatMenuCategories());
+  }
+
+  if (text === "cart") {
+    await clearPendingItem(phone);
+    await setConversationStep(phone, "selecting_items");
+    return reply(await formatCartSummary(phone));
+  }
+
+  let selectedOptions = [...pending.selectedOptions];
+
+  if (isSkip(text)) {
+    if (currentGroup.required) {
+      return reply(
+        `${currentGroup.name} is required. Reply with a number from the list.`,
+      );
+    }
+  } else {
+    const choiceIndex = Number(text) - 1;
+    if (Number.isNaN(choiceIndex) || choiceIndex < 0 || choiceIndex >= currentGroup.choices.length) {
+      return reply(
+        `Reply with a valid option number for ${currentGroup.name.toLowerCase()}, or type skip for optional choices.`,
+      );
+    }
+
+    const choice = currentGroup.choices[choiceIndex];
+    const option: SelectedOption = {
+      groupId: currentGroup.id,
+      choiceId: choice.id,
+      label: choice.label,
+      priceDeltaCents: choice.priceDeltaCents,
+    };
+    selectedOptions = [
+      ...selectedOptions.filter((entry) => entry.groupId !== currentGroup.id),
+      option,
+    ];
+  }
+
+  const nextIndex = pending.groupIndex + 1;
+  if (nextIndex >= groups.length) {
+    return finalizePendingItem(phone, {
+      ...pending,
+      selectedOptions,
+    });
+  }
+
+  const nextPending: PendingItemSelection = {
+    ...pending,
+    groupIndex: nextIndex,
+    selectedOptions,
+  };
+
+  await setConversationContext(phone, {
+    ...conversation.context,
+    pendingItem: nextPending,
+  });
+
+  return reply(formatOptionGroupPrompt(groups[nextIndex], menuItem.name));
+}
+
 function handleHelp(): BotResult {
   return reply([
     "How to order:",
     "1. Reply menu",
     "2. Choose a category number",
     "3. Add items with numbers like 1x2",
-    "4. Reply checkout",
-    "5. Choose delivery or takeaway",
-    "6. Confirm and pay",
-    "7. Send payment screenshot",
+    "4. Choose size and add-ons when asked",
+    "5. Reply checkout",
+    "6. Choose delivery or takeaway",
+    "7. Confirm and pay",
+    "8. Send payment screenshot",
     "",
     "Other commands: cart | track | help",
   ]);
@@ -405,6 +574,7 @@ export async function handleCustomerMessage(input: InboundInput): Promise<BotRes
   }
 
   if (text === "menu" || isGreeting(text) || conversation.step === "idle") {
+    await clearPendingItem(input.customerPhone);
     await setConversationStep(input.customerPhone, "browsing_menu");
     return reply(await formatMenuCategories());
   }
@@ -418,6 +588,8 @@ export async function handleCustomerMessage(input: InboundInput): Promise<BotRes
         return reply(await formatMenuCategories());
       }
       return handleItemSelection(input.customerPhone, text);
+    case "selecting_item_options":
+      return handleItemOptionSelection(input.customerPhone, text);
     case "choosing_fulfillment":
       return handleFulfillmentChoice(input.customerPhone, text);
     case "collecting_address": {
@@ -425,7 +597,7 @@ export async function handleCustomerMessage(input: InboundInput): Promise<BotRes
       if (address.length < 8) {
         return reply("Please send a complete delivery address with area and landmark.");
       }
-      setDraft(input.customerPhone, {
+      await setDraft(input.customerPhone, {
         fulfillmentType: "delivery",
         deliveryAddress: address,
       });
@@ -443,7 +615,7 @@ export async function handleCustomerMessage(input: InboundInput): Promise<BotRes
       if (pickupTime.length < 3) {
         return reply("Please send a pickup time. Example: 7:30 PM");
       }
-      setDraft(input.customerPhone, {
+      await setDraft(input.customerPhone, {
         fulfillmentType: "takeaway",
         pickupTime,
       });

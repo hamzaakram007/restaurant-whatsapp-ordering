@@ -7,7 +7,9 @@ const { Client } = pg;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const neonDir = path.join(__dirname, "..", "neon");
 
-const files = ["schema.sql", "seed-menu.sql", "seed-demo.sql"];
+const schemaFile = "schema.sql";
+const seedFiles = ["seed-menu.sql", "seed-demo.sql"];
+const migrationsDir = path.join(neonDir, "migrations");
 
 async function main() {
   const databaseUrl = process.env.DATABASE_URL;
@@ -23,16 +25,34 @@ async function main() {
 
   await client.connect();
   try {
-    for (const file of files) {
+    const schemaPath = path.join(neonDir, schemaFile);
+    if (fs.existsSync(schemaPath)) {
+      await client.query(fs.readFileSync(schemaPath, "utf8"));
+      console.log(`Applied ${schemaFile}`);
+    }
+
+    if (fs.existsSync(migrationsDir)) {
+      const migrationFiles = fs
+        .readdirSync(migrationsDir)
+        .filter((file) => file.endsWith(".sql"))
+        .sort();
+      for (const file of migrationFiles) {
+        const filePath = path.join(migrationsDir, file);
+        await client.query(fs.readFileSync(filePath, "utf8"));
+        console.log(`Applied migrations/${file}`);
+      }
+    }
+
+    for (const file of seedFiles) {
       const filePath = path.join(neonDir, file);
       if (!fs.existsSync(filePath)) {
         console.warn(`Skipping missing file: ${file}`);
         continue;
       }
-      const sql = fs.readFileSync(filePath, "utf8");
-      await client.query(sql);
+      await client.query(fs.readFileSync(filePath, "utf8"));
       console.log(`Applied ${file}`);
     }
+
     console.log("Neon migrations completed successfully.");
   } finally {
     await client.end();

@@ -8,6 +8,15 @@ export const seedCategories: MenuCategory[] = [
   { id: "desserts", name: "Desserts", sortOrder: 5 },
 ];
 
+const sizeGroup = (
+  choices: { id: string; label: string; priceDeltaCents: number }[],
+) => ({
+  id: "size",
+  name: "Size",
+  required: true,
+  choices,
+});
+
 export const seedMenuItems: MenuItem[] = [
   {
     id: "latte",
@@ -17,7 +26,30 @@ export const seedMenuItems: MenuItem[] = [
     priceCents: 45000,
     available: true,
     prepMinutes: 5,
-    modifiers: ["Regular", "Large", "Oat milk", "Extra shot"],
+    optionGroups: [
+      sizeGroup([
+        { id: "small", label: "Small", priceDeltaCents: 0 },
+        { id: "medium", label: "Medium", priceDeltaCents: 3000 },
+        { id: "large", label: "Large", priceDeltaCents: 6000 },
+      ]),
+      {
+        id: "milk",
+        name: "Milk",
+        required: false,
+        choices: [
+          { id: "regular", label: "Regular milk", priceDeltaCents: 0 },
+          { id: "oat", label: "Oat milk", priceDeltaCents: 5000 },
+        ],
+      },
+      {
+        id: "extras",
+        name: "Extras",
+        required: false,
+        choices: [
+          { id: "extra-shot", label: "Extra shot", priceDeltaCents: 4000 },
+        ],
+      },
+    ],
   },
   {
     id: "cappuccino",
@@ -27,7 +59,22 @@ export const seedMenuItems: MenuItem[] = [
     priceCents: 42000,
     available: true,
     prepMinutes: 5,
-    modifiers: ["Regular", "Large", "Decaf"],
+    optionGroups: [
+      sizeGroup([
+        { id: "small", label: "Small", priceDeltaCents: 0 },
+        { id: "medium", label: "Medium", priceDeltaCents: 3000 },
+        { id: "large", label: "Large", priceDeltaCents: 6000 },
+      ]),
+      {
+        id: "style",
+        name: "Style",
+        required: false,
+        choices: [
+          { id: "regular", label: "Regular", priceDeltaCents: 0 },
+          { id: "decaf", label: "Decaf", priceDeltaCents: 2000 },
+        ],
+      },
+    ],
   },
   {
     id: "americano",
@@ -37,7 +84,22 @@ export const seedMenuItems: MenuItem[] = [
     priceCents: 38000,
     available: true,
     prepMinutes: 4,
-    modifiers: ["Hot", "Iced"],
+    optionGroups: [
+      {
+        id: "temperature",
+        name: "Temperature",
+        required: true,
+        choices: [
+          { id: "hot", label: "Hot", priceDeltaCents: 0 },
+          { id: "iced", label: "Iced", priceDeltaCents: 3000 },
+        ],
+      },
+      sizeGroup([
+        { id: "small", label: "Small", priceDeltaCents: 0 },
+        { id: "medium", label: "Medium", priceDeltaCents: 2000 },
+        { id: "large", label: "Large", priceDeltaCents: 4000 },
+      ]),
+    ],
   },
   {
     id: "karak",
@@ -47,7 +109,22 @@ export const seedMenuItems: MenuItem[] = [
     priceCents: 25000,
     available: true,
     prepMinutes: 6,
-    modifiers: ["Regular", "Less sweet", "Extra cardamom"],
+    optionGroups: [
+      sizeGroup([
+        { id: "regular", label: "Regular", priceDeltaCents: 0 },
+        { id: "large", label: "Large", priceDeltaCents: 5000 },
+      ]),
+      {
+        id: "sweetness",
+        name: "Sweetness",
+        required: false,
+        choices: [
+          { id: "normal", label: "Normal", priceDeltaCents: 0 },
+          { id: "less-sweet", label: "Less sweet", priceDeltaCents: 0 },
+          { id: "extra-cardamom", label: "Extra cardamom", priceDeltaCents: 1000 },
+        ],
+      },
+    ],
   },
   {
     id: "green-tea",
@@ -57,7 +134,17 @@ export const seedMenuItems: MenuItem[] = [
     priceCents: 22000,
     available: true,
     prepMinutes: 4,
-    modifiers: ["Hot", "Iced"],
+    optionGroups: [
+      {
+        id: "temperature",
+        name: "Temperature",
+        required: true,
+        choices: [
+          { id: "hot", label: "Hot", priceDeltaCents: 0 },
+          { id: "iced", label: "Iced", priceDeltaCents: 2000 },
+        ],
+      },
+    ],
   },
   {
     id: "omelette",
@@ -67,7 +154,17 @@ export const seedMenuItems: MenuItem[] = [
     priceCents: 55000,
     available: true,
     prepMinutes: 12,
-    modifiers: ["White bread", "Brown bread"],
+    optionGroups: [
+      {
+        id: "bread",
+        name: "Bread",
+        required: true,
+        choices: [
+          { id: "white", label: "White bread", priceDeltaCents: 0 },
+          { id: "brown", label: "Brown bread", priceDeltaCents: 2000 },
+        ],
+      },
+    ],
   },
   {
     id: "paratha",
@@ -77,7 +174,17 @@ export const seedMenuItems: MenuItem[] = [
     priceCents: 48000,
     available: true,
     prepMinutes: 15,
-    modifiers: ["Mild", "Spicy"],
+    optionGroups: [
+      {
+        id: "spice",
+        name: "Spice level",
+        required: true,
+        choices: [
+          { id: "mild", label: "Mild", priceDeltaCents: 0 },
+          { id: "spicy", label: "Spicy", priceDeltaCents: 0 },
+        ],
+      },
+    ],
   },
   {
     id: "classic-burger",
@@ -87,7 +194,21 @@ export const seedMenuItems: MenuItem[] = [
     priceCents: 75000,
     available: true,
     prepMinutes: 18,
-    modifiers: ["Single", "Double", "No onions"],
+    optionGroups: [
+      sizeGroup([
+        { id: "single", label: "Single patty", priceDeltaCents: 0 },
+        { id: "double", label: "Double patty", priceDeltaCents: 15000 },
+      ]),
+      {
+        id: "extras",
+        name: "Extras",
+        required: false,
+        choices: [
+          { id: "no-onions", label: "No onions", priceDeltaCents: 0 },
+          { id: "extra-cheese", label: "Extra cheese", priceDeltaCents: 3000 },
+        ],
+      },
+    ],
   },
   {
     id: "chicken-burger",
@@ -97,7 +218,22 @@ export const seedMenuItems: MenuItem[] = [
     priceCents: 72000,
     available: true,
     prepMinutes: 18,
-    modifiers: ["Spicy mayo", "Extra cheese"],
+    optionGroups: [
+      sizeGroup([
+        { id: "single", label: "Single", priceDeltaCents: 0 },
+        { id: "double", label: "Double", priceDeltaCents: 12000 },
+      ]),
+      {
+        id: "sauce",
+        name: "Sauce",
+        required: false,
+        choices: [
+          { id: "regular-mayo", label: "Regular mayo", priceDeltaCents: 0 },
+          { id: "spicy-mayo", label: "Spicy mayo", priceDeltaCents: 0 },
+          { id: "extra-cheese", label: "Extra cheese", priceDeltaCents: 3000 },
+        ],
+      },
+    ],
   },
   {
     id: "brownie",
@@ -107,7 +243,16 @@ export const seedMenuItems: MenuItem[] = [
     priceCents: 35000,
     available: true,
     prepMinutes: 3,
-    modifiers: ["With ice cream"],
+    optionGroups: [
+      {
+        id: "extras",
+        name: "Extras",
+        required: false,
+        choices: [
+          { id: "ice-cream", label: "With ice cream", priceDeltaCents: 8000 },
+        ],
+      },
+    ],
   },
   {
     id: "cheesecake",
@@ -117,6 +262,15 @@ export const seedMenuItems: MenuItem[] = [
     priceCents: 42000,
     available: true,
     prepMinutes: 2,
-    modifiers: ["Berry topping"],
+    optionGroups: [
+      {
+        id: "topping",
+        name: "Topping",
+        required: false,
+        choices: [
+          { id: "berry", label: "Berry topping", priceDeltaCents: 5000 },
+        ],
+      },
+    ],
   },
 ];

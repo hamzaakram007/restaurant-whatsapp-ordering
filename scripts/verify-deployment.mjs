@@ -18,6 +18,8 @@ async function main() {
     await check("/api/health"),
     await check("/api/demo/status"),
     await check("/api/orders"),
+    await check("/api/twilio/whatsapp"),
+    await check("/api/twilio/setup"),
   ];
 
   for (const result of checks) {
@@ -35,6 +37,11 @@ async function main() {
 
   if (health?.storage !== "neon-postgres") {
     console.warn("Warning: DATABASE_URL not configured on deployment (using in-memory demo mode).");
+  }
+
+  const twilioSetup = checks.find((result) => result.path === "/api/twilio/setup")?.json;
+  if (!twilioSetup?.twilioConfigured) {
+    console.warn("Warning: Twilio credentials not configured. Set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN for live WhatsApp demo.");
   }
 }
 

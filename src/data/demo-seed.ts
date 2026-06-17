@@ -1,5 +1,23 @@
 import { restaurantConfig } from "@/data/restaurant-config";
-import type { Customer, Order, OrderEvent } from "@/lib/types";
+import type { CartLine, Customer, Order, OrderEvent } from "@/lib/types";
+
+function demoLine(
+  menuItemId: string,
+  name: string,
+  quantity: number,
+  unitPriceCents: number,
+  selectedOptions: CartLine["selectedOptions"] = [],
+): CartLine {
+  const choiceIds = selectedOptions.map((option) => option.choiceId).sort().join(":");
+  return {
+    menuItemId,
+    name,
+    quantity,
+    unitPriceCents,
+    selectedOptions,
+    lineKey: choiceIds ? `${menuItemId}:${choiceIds}` : menuItemId,
+  };
+}
 
 export const DEMO_PAYMENT_SCREENSHOT_URL =
   "https://images.unsplash.com/photo-1563013544-824ae1b704d3?w=800&q=80";
@@ -51,22 +69,14 @@ export const demoOrders: Order[] = [
     fulfillmentType: "delivery",
     deliveryAddress: "House 12, Main Boulevard, Gulberg III, Lahore",
     items: [
-      {
-        menuItemId: "latte",
-        name: "Cafe Latte",
-        quantity: 2,
-        unitPriceCents: 45000,
-      },
-      {
-        menuItemId: "brownie",
-        name: "Chocolate Brownie",
-        quantity: 1,
-        unitPriceCents: 35000,
-      },
+      demoLine("latte", "Cafe Latte (Medium)", 2, 48000, [
+        { groupId: "size", choiceId: "medium", label: "Medium", priceDeltaCents: 3000 },
+      ]),
+      demoLine("brownie", "Chocolate Brownie", 1, 35000),
     ],
-    subtotalCents: 125000,
+    subtotalCents: 131000,
     deliveryFeeCents: restaurantConfig.deliveryFeeCents,
-    totalCents: 125000 + restaurantConfig.deliveryFeeCents,
+    totalCents: 131000 + restaurantConfig.deliveryFeeCents,
     paymentScreenshotUrl: DEMO_PAYMENT_SCREENSHOT_URL,
     createdAt: "2026-06-15T11:20:00.000Z",
     updatedAt: "2026-06-15T11:25:00.000Z",
@@ -81,22 +91,16 @@ export const demoOrders: Order[] = [
     fulfillmentType: "takeaway",
     pickupTime: "1:30 PM",
     items: [
-      {
-        menuItemId: "cappuccino",
-        name: "Cappuccino",
-        quantity: 1,
-        unitPriceCents: 42000,
-      },
-      {
-        menuItemId: "paratha",
-        name: "Chicken Paratha Roll",
-        quantity: 2,
-        unitPriceCents: 48000,
-      },
+      demoLine("cappuccino", "Cappuccino (Large)", 1, 48000, [
+        { groupId: "size", choiceId: "large", label: "Large", priceDeltaCents: 6000 },
+      ]),
+      demoLine("paratha", "Chicken Paratha Roll (Mild)", 2, 48000, [
+        { groupId: "spice", choiceId: "mild", label: "Mild", priceDeltaCents: 0 },
+      ]),
     ],
-    subtotalCents: 138000,
+    subtotalCents: 144000,
     deliveryFeeCents: 0,
-    totalCents: 138000,
+    totalCents: 144000,
     paymentVerifiedBy: "counter",
     paymentVerifiedAt: "2026-06-15T11:35:00.000Z",
     createdAt: "2026-06-15T11:30:00.000Z",
@@ -112,22 +116,16 @@ export const demoOrders: Order[] = [
     fulfillmentType: "delivery",
     deliveryAddress: "Flat 4B, DHA Phase 5, Lahore",
     items: [
-      {
-        menuItemId: "classic-burger",
-        name: "Classic Beef Burger",
-        quantity: 2,
-        unitPriceCents: 75000,
-      },
-      {
-        menuItemId: "karak",
-        name: "Karak Chai",
-        quantity: 2,
-        unitPriceCents: 25000,
-      },
+      demoLine("classic-burger", "Classic Beef Burger (Double patty)", 2, 90000, [
+        { groupId: "size", choiceId: "double", label: "Double patty", priceDeltaCents: 15000 },
+      ]),
+      demoLine("karak", "Karak Chai (Large)", 2, 30000, [
+        { groupId: "size", choiceId: "large", label: "Large", priceDeltaCents: 5000 },
+      ]),
     ],
-    subtotalCents: 200000,
+    subtotalCents: 240000,
     deliveryFeeCents: restaurantConfig.deliveryFeeCents,
-    totalCents: 200000 + restaurantConfig.deliveryFeeCents,
+    totalCents: 240000 + restaurantConfig.deliveryFeeCents,
     paymentVerifiedBy: "counter",
     paymentVerifiedAt: "2026-06-15T11:45:00.000Z",
     kitchenAcknowledgedAt: "2026-06-15T11:50:00.000Z",
@@ -144,22 +142,15 @@ export const demoOrders: Order[] = [
     fulfillmentType: "takeaway",
     pickupTime: "12:45 PM",
     items: [
-      {
-        menuItemId: "americano",
-        name: "Americano",
-        quantity: 1,
-        unitPriceCents: 38000,
-      },
-      {
-        menuItemId: "cheesecake",
-        name: "New York Cheesecake",
-        quantity: 1,
-        unitPriceCents: 42000,
-      },
+      demoLine("americano", "Americano (Iced, Medium)", 1, 43000, [
+        { groupId: "temperature", choiceId: "iced", label: "Iced", priceDeltaCents: 3000 },
+        { groupId: "size", choiceId: "medium", label: "Medium", priceDeltaCents: 2000 },
+      ]),
+      demoLine("cheesecake", "New York Cheesecake", 1, 42000),
     ],
-    subtotalCents: 80000,
+    subtotalCents: 85000,
     deliveryFeeCents: 0,
-    totalCents: 80000,
+    totalCents: 85000,
     paymentVerifiedBy: "counter",
     paymentVerifiedAt: "2026-06-15T11:00:00.000Z",
     kitchenAcknowledgedAt: "2026-06-15T11:05:00.000Z",
@@ -176,18 +167,12 @@ export const demoOrders: Order[] = [
     fulfillmentType: "delivery",
     deliveryAddress: "Shop 8, Model Town Link Road, Lahore",
     items: [
-      {
-        menuItemId: "chicken-burger",
-        name: "Crispy Chicken Burger",
-        quantity: 1,
-        unitPriceCents: 72000,
-      },
-      {
-        menuItemId: "green-tea",
-        name: "Green Tea",
-        quantity: 1,
-        unitPriceCents: 22000,
-      },
+      demoLine("chicken-burger", "Crispy Chicken Burger (Single)", 1, 72000, [
+        { groupId: "size", choiceId: "single", label: "Single", priceDeltaCents: 0 },
+      ]),
+      demoLine("green-tea", "Green Tea (Hot)", 1, 22000, [
+        { groupId: "temperature", choiceId: "hot", label: "Hot", priceDeltaCents: 0 },
+      ]),
     ],
     subtotalCents: 94000,
     deliveryFeeCents: restaurantConfig.deliveryFeeCents,
