@@ -25,7 +25,10 @@ export function DemoHomeActions() {
   }, []);
 
   useEffect(() => {
-    void loadStatus();
+    const timeout = window.setTimeout(() => {
+      void loadStatus();
+    }, 0);
+    return () => window.clearTimeout(timeout);
   }, [loadStatus]);
 
   async function reseedDemo() {

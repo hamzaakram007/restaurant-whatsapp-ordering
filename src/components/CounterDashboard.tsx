@@ -50,9 +50,16 @@ export function CounterDashboard() {
   }, []);
 
   useEffect(() => {
-    void loadOrders();
-    const interval = setInterval(() => void loadOrders(), 4000);
-    return () => clearInterval(interval);
+    const timeout = window.setTimeout(() => {
+      void loadOrders();
+    }, 0);
+    const interval = window.setInterval(() => {
+      void loadOrders();
+    }, 4000);
+    return () => {
+      window.clearTimeout(timeout);
+      window.clearInterval(interval);
+    };
   }, [loadOrders]);
 
   async function verifyPayment(orderId: string, action: "approve" | "reject") {

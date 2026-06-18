@@ -18,9 +18,12 @@ export default function TwilioAdminPage() {
   const [setup, setSetup] = useState<SetupResponse | null>(null);
 
   useEffect(() => {
-    void fetch("/api/twilio/setup")
-      .then((response) => response.json())
-      .then((data: SetupResponse) => setSetup(data));
+    const timeout = window.setTimeout(() => {
+      void fetch("/api/twilio/setup")
+        .then((response) => response.json())
+        .then((data: SetupResponse) => setSetup(data));
+    }, 0);
+    return () => window.clearTimeout(timeout);
   }, []);
 
   async function copy(value: string) {

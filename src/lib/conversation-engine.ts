@@ -80,13 +80,15 @@ async function setDraft(phone: string, draft: CheckoutDraft) {
 
 async function clearDraft(phone: string) {
   const conversation = await getOrCreateConversation(phone);
-  const { checkoutDraft: _removed, ...rest } = conversation.context;
+  const rest = { ...conversation.context };
+  delete rest.checkoutDraft;
   await setConversationContext(phone, rest);
 }
 
 async function clearPendingItem(phone: string) {
   const conversation = await getOrCreateConversation(phone);
-  const { pendingItem: _removed, ...rest } = conversation.context;
+  const rest = { ...conversation.context };
+  delete rest.pendingItem;
   await setConversationContext(phone, rest);
 }
 

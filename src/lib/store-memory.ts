@@ -18,7 +18,6 @@ import type {
   OrderEvent,
   OrderStatus,
   PaymentStatus,
-  SelectedOption,
 } from "@/lib/types";
 
 type StoreState = {

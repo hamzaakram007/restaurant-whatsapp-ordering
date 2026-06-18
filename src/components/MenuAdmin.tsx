@@ -45,7 +45,10 @@ export function MenuAdmin() {
   }
 
   useEffect(() => {
-    void loadItems();
+    const timeout = window.setTimeout(() => {
+      void loadItems();
+    }, 0);
+    return () => window.clearTimeout(timeout);
   }, []);
 
   function startNew() {

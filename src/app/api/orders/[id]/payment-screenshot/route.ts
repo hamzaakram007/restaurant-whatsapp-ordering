@@ -1,6 +1,5 @@
 export const dynamic = "force-dynamic";
 
-import { isDatabaseEnabled } from "@/lib/db";
 import { getOrderById } from "@/lib/store";
 
 type RouteContext = {

@@ -1,7 +1,7 @@
 import { restaurantConfig } from "@/data/restaurant-config";
 import type { OrderStatus } from "@/lib/types";
 import { sendWhatsAppMessages } from "@/lib/twilio";
-import { formatMoney, formatOrderNumber } from "@/lib/format";
+import { formatOrderNumber } from "@/lib/format";
 
 const statusToTrackingKey: Partial<
   Record<OrderStatus, keyof typeof restaurantConfig.trackingMessages>

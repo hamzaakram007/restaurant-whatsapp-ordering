@@ -4,6 +4,10 @@ import path from "path";
 export default defineConfig({
   test: {
     environment: "node",
+    env: {
+      DATABASE_URL: "",
+    },
+    testTimeout: 15000,
   },
   resolve: {
     alias: {

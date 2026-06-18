@@ -42,9 +42,16 @@ export function KitchenDisplay() {
   }, []);
 
   useEffect(() => {
-    void loadOrders();
-    const interval = setInterval(() => void loadOrders(), 3000);
-    return () => clearInterval(interval);
+    const timeout = window.setTimeout(() => {
+      void loadOrders();
+    }, 0);
+    const interval = window.setInterval(() => {
+      void loadOrders();
+    }, 3000);
+    return () => {
+      window.clearTimeout(timeout);
+      window.clearInterval(interval);
+    };
   }, [loadOrders]);
 
   async function acknowledge(orderId: string) {

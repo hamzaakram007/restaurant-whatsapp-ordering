@@ -25,6 +25,7 @@ export function WhatsAppDemoChat() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const messageIdRef = useRef(0);
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -38,7 +39,7 @@ export function WhatsAppDemoChat() {
     if (!body.trim() && !mediaUrl) return;
 
     const customerMessage: ChatMessage = {
-      id: `customer-${Date.now()}`,
+      id: `customer-${++messageIdRef.current}`,
       role: "customer",
       body: body || "Payment screenshot",
       mediaUrl,
@@ -61,7 +62,7 @@ export function WhatsAppDemoChat() {
       };
 
       const botMessages = (data.messages ?? []).map((message, index) => ({
-        id: `bot-${Date.now()}-${index}`,
+        id: `bot-${++messageIdRef.current}-${index}`,
         role: "bot" as const,
         body: message.body,
         mediaUrl: message.mediaUrl,
@@ -72,7 +73,7 @@ export function WhatsAppDemoChat() {
       setMessages((current) => [
         ...current,
         {
-          id: `error-${Date.now()}`,
+          id: `error-${++messageIdRef.current}`,
           role: "bot",
           body: "Could not reach the demo bot. Make sure the dev server is running.",
         },
