@@ -20,5 +20,8 @@ export const restaurantConfig = {
     completed: "Order delivered. Thank you for ordering with us!",
     payment_rejected:
       "We could not verify your payment. Please send a clear screenshot or contact the counter.",
+    order_updated:
+      "Your order was updated. Please review the new total and payment details if needed.",
+    order_cancelled: "Your order has been cancelled.",
   },
 } as const;

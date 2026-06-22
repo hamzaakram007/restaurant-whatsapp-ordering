@@ -22,11 +22,15 @@ export type ConversationStep =
   | "browsing_menu"
   | "selecting_items"
   | "selecting_item_options"
+  | "editing_order"
+  | "editing_order_note"
+  | "editing_order_confirm_cancel"
   | "choosing_fulfillment"
   | "collecting_address"
   | "collecting_pickup_time"
   | "confirming_order"
-  | "awaiting_payment_screenshot";
+  | "awaiting_payment_screenshot"
+  | "choosing_branch";
 
 export type MenuCategory = {
   id: string;
@@ -92,6 +96,8 @@ export type PendingItemSelection = {
 export type ConversationContext = {
   checkoutDraft?: CheckoutDraft;
   pendingItem?: PendingItemSelection;
+  editingOrderId?: string;
+  branchId?: string;
 };
 
 export type Customer = {
@@ -116,6 +122,7 @@ export type Conversation = {
 export type Order = {
   id: string;
   orderNumber: number;
+  branchId?: string;
   customerPhone: string;
   customerName?: string;
   status: OrderStatus;
@@ -153,4 +160,115 @@ export type BotMessage = {
 export type BotResult = {
   messages: BotMessage[];
   orderId?: string;
+};
+
+export type RestaurantStatus = "trial" | "active" | "suspended";
+export type RestaurantPlan = "trial" | "starter" | "pro";
+export type TwilioMode = "platform" | "byo";
+export type MemberRole = "owner" | "counter" | "kitchen";
+
+export type RestaurantPaymentConfig = {
+  accountTitle: string;
+  bankName: string;
+  accountNumber: string;
+  iban: string;
+  instructions: string;
+};
+
+export type RestaurantTrackingMessages = {
+  confirmed: string;
+  in_kitchen: string;
+  ready: string;
+  out_for_delivery: string;
+  completed: string;
+  payment_rejected: string;
+  order_updated: string;
+  order_cancelled: string;
+};
+
+export type Restaurant = {
+  id: string;
+  slug: string;
+  name: string;
+  tagline: string;
+  currency: string;
+  deliveryFeeCents: number;
+  payment: RestaurantPaymentConfig;
+  trackingMessages: RestaurantTrackingMessages;
+  status: RestaurantStatus;
+  plan: RestaurantPlan;
+  twilioMode: TwilioMode;
+  twilioAccountSid?: string;
+  twilioAuthTokenEncrypted?: string;
+  twilioWhatsappFrom?: string;
+  centralTwilioWhatsappFrom?: string;
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string;
+  trialEndsAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RestaurantConfig = {
+  name: string;
+  tagline: string;
+  whatsappSender: string;
+  currency: string;
+  deliveryFeeCents: number;
+  payment: RestaurantPaymentConfig;
+  trackingMessages: RestaurantTrackingMessages;
+};
+
+export type User = {
+  id: string;
+  email: string;
+  name?: string;
+  createdAt: string;
+};
+
+export type RestaurantMember = {
+  restaurantId: string;
+  userId: string;
+  role: MemberRole;
+  createdAt: string;
+};
+
+export type SessionUser = {
+  userId: string;
+  email: string;
+  name?: string;
+  restaurantId: string;
+  branchId?: string;
+  role: MemberRole;
+};
+
+export type Branch = {
+  id: string;
+  restaurantId: string;
+  slug: string;
+  name: string;
+  city: string;
+  address: string;
+  deliveryFeeCents?: number;
+  payment?: RestaurantPaymentConfig;
+  twilioWhatsappFrom?: string;
+  isDefault: boolean;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BranchMenuOverride = {
+  branchId: string;
+  menuItemId: string;
+  available?: boolean;
+  priceCents?: number;
+  name?: string;
+  description?: string;
+};
+
+export type BranchConfig = RestaurantConfig & {
+  branchId: string;
+  branchName: string;
+  branchSlug: string;
 };

@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "verify": "npm run lint && npm test && npm run build",
     "db:migrate": "node scripts/db-migrate.mjs",
     "demo:seed": "node scripts/demo-seed.mjs",
     "demo:flow": "node scripts/demo-flow.mjs",
@@ -20,6 +21,7 @@
     "next": "16.2.7",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "stripe": "^22.2.1",
     "twilio": "^6.0.2",
     "zod": "^4.4.3"
   },

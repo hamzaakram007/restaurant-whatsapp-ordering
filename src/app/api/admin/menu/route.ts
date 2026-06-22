@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { z } from "zod";
 import { getAllMenuItems, getCategories, upsertMenuItem } from "@/lib/store";
 import type { MenuItem } from "@/lib/types";
+import { requireRestaurantFromRequest, tenantErrorResponse } from "@/lib/tenant-context";
 
 const optionChoiceSchema = z.object({
   id: z.string().min(1),
@@ -29,31 +30,52 @@ const menuItemSchema = z.object({
   imageUrl: z.string().optional(),
 });
 
-export async function GET() {
-  const [items, categories] = await Promise.all([getAllMenuItems(), getCategories()]);
-  return Response.json({ items, categories });
+export async function GET(request: Request) {
+  try {
+    const restaurant = await requireRestaurantFromRequest(request);
+    const restaurantId = restaurant.id;
+    const [items, categories] = await Promise.all([
+      getAllMenuItems(restaurantId),
+      getCategories(restaurantId),
+    ]);
+    return Response.json({ items, categories });
+  } catch (error) {
+    return tenantErrorResponse(error);
+  }
 }
 
 export async function POST(request: Request) {
-  const body = menuItemSchema.parse(await request.json());
-  const item = await upsertMenuItem(body as MenuItem);
-  return Response.json({ item }, { status: 201 });
+  try {
+    const restaurant = await requireRestaurantFromRequest(request);
+    const restaurantId = restaurant.id;
+    const body = menuItemSchema.parse(await request.json());
+    const item = await upsertMenuItem(restaurantId, body as MenuItem);
+    return Response.json({ item }, { status: 201 });
+  } catch (error) {
+    return tenantErrorResponse(error);
+  }
 }
 
 export async function PATCH(request: Request) {
-  const body = menuItemSchema.partial().extend({ id: z.string() }).parse(
-    await request.json(),
-  );
-  const items = await getAllMenuItems();
-  const existing = items.find((item) => item.id === body.id);
-  if (!existing) {
-    return Response.json({ error: "Item not found" }, { status: 404 });
-  }
+  try {
+    const restaurant = await requireRestaurantFromRequest(request);
+    const restaurantId = restaurant.id;
+    const body = menuItemSchema.partial().extend({ id: z.string() }).parse(
+      await request.json(),
+    );
+    const items = await getAllMenuItems(restaurantId);
+    const existing = items.find((item) => item.id === body.id);
+    if (!existing) {
+      return Response.json({ error: "Item not found" }, { status: 404 });
+    }
 
-  const item = await upsertMenuItem({
-    ...existing,
-    ...body,
-    optionGroups: body.optionGroups ?? existing.optionGroups,
-  } as MenuItem);
-  return Response.json({ item });
+    const item = await upsertMenuItem(restaurantId, {
+      ...existing,
+      ...body,
+      optionGroups: body.optionGroups ?? existing.optionGroups,
+    } as MenuItem);
+    return Response.json({ item });
+  } catch (error) {
+    return tenantErrorResponse(error);
+  }
 }

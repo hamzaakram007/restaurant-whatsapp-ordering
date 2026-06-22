@@ -21,6 +21,14 @@ Use this runbook when presenting to a client on **real WhatsApp** via the Twilio
 | 6 | Client | Send payment screenshot image |
 | 7 | You | Open `/dashboard`, approve payment, show screenshot via proxy link |
 | 8 | You | Open `/kitchen`, acknowledge order |
+| 9 | Client | Send `edit order` → change address or items → `save` (before kitchen starts) |
+| 10 | You | On `/dashboard`, use **Edit order** to adjust items or cancel |
+
+## Order edits (demo talking points)
+
+- Edits work on WhatsApp (`edit order`) and on the counter dashboard (**Edit order** button).
+- Locked once the order is `in_kitchen` — suggest `track` instead.
+- Changing items after payment approval may require a new screenshot for the updated total.
 
 ## Fallback
 

@@ -1,6 +1,6 @@
 import twilio, { validateRequest } from "twilio";
 import { z } from "zod";
-import { restaurantConfig } from "@/data/restaurant-config";
+import { decryptSecret, getRestaurantById } from "@/lib/restaurant-store";
 import type { BotMessage } from "@/lib/types";
 
 export const twilioInboundSchema = z.object({
@@ -42,11 +42,22 @@ export function twilioWebhookUrl(request: Request, pathname = "/api/twilio/whats
 export function validateTwilioSignature(
   request: Request,
   params: Record<string, string>,
+  restaurant?: {
+    twilioMode?: string;
+    twilioAuthTokenEncrypted?: string;
+  },
 ) {
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
   const shouldValidate = process.env.TWILIO_VALIDATE_SIGNATURE !== "false";
+  if (!shouldValidate) {
+    return true;
+  }
 
-  if (!shouldValidate || !authToken) {
+  let authToken = process.env.TWILIO_AUTH_TOKEN;
+  if (restaurant?.twilioMode === "byo" && restaurant.twilioAuthTokenEncrypted) {
+    authToken = decryptSecret(restaurant.twilioAuthTokenEncrypted);
+  }
+
+  if (!authToken) {
     return true;
   }
 
@@ -92,22 +103,52 @@ function normalizeWhatsAppAddress(value: string) {
   return `whatsapp:${trimmed.replace(/^whatsapp:/i, "")}`;
 }
 
-export async function sendWhatsAppMessages(to: string, messages: BotMessage[]) {
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
+async function getTwilioCredentials(restaurantId: string) {
+  const restaurant = await getRestaurantById(restaurantId);
+  if (!restaurant) throw new Error("Restaurant not found");
 
-  if (!accountSid || !authToken) {
+  if (restaurant.twilioMode === "byo" && restaurant.twilioAccountSid) {
+    return {
+      accountSid: restaurant.twilioAccountSid,
+      authToken: restaurant.twilioAuthTokenEncrypted
+        ? decryptSecret(restaurant.twilioAuthTokenEncrypted)
+        : process.env.TWILIO_AUTH_TOKEN,
+      from:
+        restaurant.twilioWhatsappFrom ??
+        process.env.TWILIO_WHATSAPP_FROM ??
+        "whatsapp:+14155238886",
+    };
+  }
+
+  return {
+    accountSid: process.env.TWILIO_ACCOUNT_SID,
+    authToken: process.env.TWILIO_AUTH_TOKEN,
+    from:
+      restaurant.twilioWhatsappFrom ??
+      process.env.TWILIO_WHATSAPP_FROM ??
+      "whatsapp:+14155238886",
+  };
+}
+
+export async function sendWhatsAppMessages(
+  restaurantId: string,
+  to: string,
+  messages: BotMessage[],
+) {
+  const credentials = await getTwilioCredentials(restaurantId);
+
+  if (!credentials.accountSid || !credentials.authToken) {
     console.warn("Twilio credentials missing; skipping outbound WhatsApp message");
     return [];
   }
 
-  const client = twilio(accountSid, authToken);
+  const client = twilio(credentials.accountSid, credentials.authToken);
   const sent = [];
 
   for (const item of messages) {
     sent.push(
       await client.messages.create({
-        from: normalizeWhatsAppAddress(restaurantConfig.whatsappSender),
+        from: normalizeWhatsAppAddress(credentials.from),
         to: normalizeWhatsAppAddress(to),
         body: item.body,
         mediaUrl: item.mediaUrl ? [item.mediaUrl] : undefined,

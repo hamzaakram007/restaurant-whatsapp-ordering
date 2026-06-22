@@ -6,6 +6,7 @@ export default defineConfig({
     environment: "node",
     env: {
       DATABASE_URL: "",
+      AUTH_SECRET: "test-auth-secret-for-vitest",
     },
     testTimeout: 15000,
   },

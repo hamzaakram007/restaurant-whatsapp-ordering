@@ -26,9 +26,11 @@ export function OrderStatusBadge({ status }: { status: Order["status"] }) {
 export function OrderCard({
   order,
   actions,
+  currency = "PKR",
 }: {
   order: Order;
   actions?: ReactNode;
+  currency?: string;
 }) {
   return (
     <article className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
@@ -64,8 +66,9 @@ export function OrderCard({
         </p>
         {order.deliveryAddress ? <p>Address: {order.deliveryAddress}</p> : null}
         {order.pickupTime ? <p>Pickup: {order.pickupTime}</p> : null}
+        {order.notes ? <p>Notes: {order.notes}</p> : null}
         <p>
-          <span className="font-medium">Total:</span> {formatMoney(order.totalCents)}
+          <span className="font-medium">Total:</span> {formatMoney(order.totalCents, currency)}
         </p>
         <p>
           <span className="font-medium">Payment:</span> {order.paymentStatus}

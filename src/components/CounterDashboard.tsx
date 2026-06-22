@@ -2,8 +2,11 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { BranchSwitcher } from "@/components/BranchSwitcher";
 import { DemoModeBanner, EmptyOrdersState } from "@/components/DemoModeBanner";
+import { OrderEditButton } from "@/components/OrderEditModal";
 import { OrderCard } from "@/components/OrderCard";
+import { useTenant } from "@/components/TenantProvider";
 import type { Order } from "@/lib/types";
 
 function playBell() {
@@ -20,6 +23,8 @@ function playBell() {
 }
 
 export function CounterDashboard() {
+  const { config, branch } = useTenant();
+  const currency = config?.currency ?? "PKR";
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -103,9 +108,13 @@ export function CounterDashboard() {
       <header className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-stone-900">Counter Dashboard</h1>
-          <p className="text-stone-600">Payment verification and live order control</p>
+          <p className="text-stone-600">
+            Payment verification and live order control
+            {branch ? ` · ${branch.name}` : ""}
+          </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <BranchSwitcher />
           <Link
             href="/demo"
             className="rounded-xl border border-stone-300 px-4 py-2 text-sm font-medium"
@@ -140,8 +149,10 @@ export function CounterDashboard() {
             <OrderCard
               key={order.id}
               order={order}
+              currency={currency}
               actions={
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
+                  <OrderEditButton order={order} onSaved={() => void loadOrders()} />
                   <button
                     type="button"
                     onClick={() => void verifyPayment(order.id, "approve")}
@@ -179,8 +190,10 @@ export function CounterDashboard() {
             <OrderCard
               key={order.id}
               order={order}
+              currency={currency}
               actions={
                 <div className="flex flex-wrap gap-2">
+                  <OrderEditButton order={order} onSaved={() => void loadOrders()} />
                   {order.status === "confirmed" ? (
                     <button
                       type="button"

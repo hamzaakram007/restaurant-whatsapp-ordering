@@ -1,6 +1,8 @@
 export const dynamic = "force-dynamic";
 
+import { decryptSecret } from "@/lib/restaurant-store";
 import { getOrderById } from "@/lib/store";
+import { requireBranchFromRequest, tenantErrorResponse } from "@/lib/tenant-context";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -10,46 +12,61 @@ function isTwilioMediaUrl(url: string) {
   return url.includes("api.twilio.com");
 }
 
-export async function GET(_request: Request, context: RouteContext) {
-  const { id } = await context.params;
-  const order = await getOrderById(id);
+export async function GET(request: Request, context: RouteContext) {
+  try {
+    const { restaurant, branch } = await requireBranchFromRequest(request);
+    const restaurantId = restaurant.id;
+    const branchId = branch.id;
+    const { id } = await context.params;
+    const order = await getOrderById(restaurantId, branchId, id);
 
-  if (!order?.paymentScreenshotUrl) {
-    return new Response("Payment screenshot not found", { status: 404 });
-  }
+    if (!order?.paymentScreenshotUrl) {
+      return new Response("Payment screenshot not found", { status: 404 });
+    }
 
-  const screenshotUrl = order.paymentScreenshotUrl;
+    const screenshotUrl = order.paymentScreenshotUrl;
 
-  if (!isTwilioMediaUrl(screenshotUrl)) {
-    return Response.redirect(screenshotUrl, 302);
-  }
+    if (!isTwilioMediaUrl(screenshotUrl)) {
+      return Response.redirect(screenshotUrl, 302);
+    }
 
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-  if (!accountSid || !authToken) {
-    return new Response("Twilio credentials not configured", { status: 500 });
-  }
+    let accountSid = process.env.TWILIO_ACCOUNT_SID;
+    let authToken = process.env.TWILIO_AUTH_TOKEN;
 
-  const credentials = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
-  const response = await fetch(screenshotUrl, {
-    headers: {
-      Authorization: `Basic ${credentials}`,
-    },
-  });
+    if (restaurant.twilioMode === "byo" && restaurant.twilioAccountSid) {
+      accountSid = restaurant.twilioAccountSid;
+      if (restaurant.twilioAuthTokenEncrypted) {
+        authToken = decryptSecret(restaurant.twilioAuthTokenEncrypted);
+      }
+    }
 
-  if (!response.ok) {
-    return new Response("Failed to fetch payment screenshot from Twilio", {
-      status: response.status,
+    if (!accountSid || !authToken) {
+      return new Response("Twilio credentials not configured", { status: 500 });
+    }
+
+    const credentials = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
+    const response = await fetch(screenshotUrl, {
+      headers: {
+        Authorization: `Basic ${credentials}`,
+      },
     });
+
+    if (!response.ok) {
+      return new Response("Failed to fetch payment screenshot from Twilio", {
+        status: response.status,
+      });
+    }
+
+    const contentType = response.headers.get("content-type") ?? "image/jpeg";
+    const buffer = await response.arrayBuffer();
+
+    return new Response(buffer, {
+      headers: {
+        "content-type": contentType,
+        "cache-control": "private, max-age=300",
+      },
+    });
+  } catch (error) {
+    return tenantErrorResponse(error);
   }
-
-  const contentType = response.headers.get("content-type") ?? "image/jpeg";
-  const buffer = await response.arrayBuffer();
-
-  return new Response(buffer, {
-    headers: {
-      "content-type": contentType,
-      "cache-control": "private, max-age=300",
-    },
-  });
 }

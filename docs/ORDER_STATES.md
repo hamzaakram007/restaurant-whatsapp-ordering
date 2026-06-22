@@ -14,6 +14,23 @@
 | `collecting_pickup_time` | pickup time | `confirming_order` |
 | `confirming_order` | yes | `awaiting_payment_screenshot` |
 | `awaiting_payment_screenshot` | image upload | `idle` |
+| `editing_order` | edit order command | submenu for items / address / note / cancel |
+| `editing_order_note` | note text | back to `editing_order` |
+| `editing_order_confirm_cancel` | yes / no | cancel order or back to `editing_order` |
+
+Global commands (any step): `menu`, `cart`, `checkout`, `track`, `edit order`, `help`.
+
+## Editable orders
+
+Customers and counter staff can change an order **before the kitchen starts**:
+
+| Editable statuses | Locked statuses |
+|-------------------|-----------------|
+| `awaiting_payment`, `payment_uploaded`, `confirmed` | `in_kitchen`, `ready`, `out_for_delivery`, `completed`, `cancelled` |
+
+Editable fields: line items, delivery/pickup details, notes, cancel.
+
+If items change after payment was approved (`paid`), payment resets to `payment_requested` and the customer is asked to verify the new total.
 
 ## Order statuses
 

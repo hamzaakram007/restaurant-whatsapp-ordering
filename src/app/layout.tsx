@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { TenantProvider } from "@/components/TenantProvider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -13,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Brew & Bite | WhatsApp Ordering",
-  description: "Restaurant and coffee shop WhatsApp ordering with kitchen and counter dashboards",
+  title: "WhatsApp Restaurant Ordering",
+  description: "Multi-tenant WhatsApp ordering for restaurants and coffee shops",
 };
 
 export default function RootLayout({
@@ -27,7 +28,9 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <TenantProvider>{children}</TenantProvider>
+      </body>
     </html>
   );
 }

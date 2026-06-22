@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DEMO_CHAT_PHONE, DEMO_PAYMENT_SCREENSHOT_URL } from "@/data/demo-seed";
-import { restaurantConfig } from "@/data/restaurant-config";
+import { useTenant } from "@/components/TenantProvider";
 
 type ChatMessage = {
   id: string;
@@ -15,13 +15,24 @@ type ChatMessage = {
 const quickActions = ["menu", "cart", "checkout", "track", "help"];
 
 export function WhatsAppDemoChat() {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "welcome",
-      role: "bot",
-      body: `Welcome to ${restaurantConfig.name} demo chat. Type "menu" or use the quick actions below to start ordering.`,
-    },
-  ]);
+  const { config, loading } = useTenant();
+  const restaurantName = config?.name ?? "Restaurant";
+  const welcomeMessage = useMemo<ChatMessage | null>(
+    () =>
+      config
+        ? {
+            id: "welcome",
+            role: "bot",
+            body: `Welcome to ${config.name} demo chat. Type "menu" or use the quick actions below to start ordering.`,
+          }
+        : null,
+    [config],
+  );
+  const [thread, setThread] = useState<ChatMessage[]>([]);
+  const messages = useMemo(
+    () => (thread.length > 0 ? thread : welcomeMessage ? [welcomeMessage] : []),
+    [thread, welcomeMessage],
+  );
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -44,7 +55,11 @@ export function WhatsAppDemoChat() {
       body: body || "Payment screenshot",
       mediaUrl,
     };
-    setMessages((current) => [...current, customerMessage]);
+    setThread((current) => {
+      const base =
+        current.length === 0 && welcomeMessage ? [welcomeMessage] : current;
+      return [...base, customerMessage];
+    });
     setSending(true);
 
     try {
@@ -68,9 +83,9 @@ export function WhatsAppDemoChat() {
         mediaUrl: message.mediaUrl,
       }));
 
-      setMessages((current) => [...current, ...botMessages]);
+      setThread((current) => [...current, ...botMessages]);
     } catch {
-      setMessages((current) => [
+      setThread((current) => [
         ...current,
         {
           id: `error-${++messageIdRef.current}`,
@@ -86,7 +101,7 @@ export function WhatsAppDemoChat() {
 
   async function resetChat() {
     await fetch("/api/demo/reset-chat", { method: "POST" });
-    setMessages([
+    setThread([
       {
         id: "welcome-reset",
         role: "bot",
@@ -102,7 +117,9 @@ export function WhatsAppDemoChat() {
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-700">
             WhatsApp Demo
           </p>
-          <h1 className="text-3xl font-bold text-stone-900">{restaurantConfig.name}</h1>
+          <h1 className="text-3xl font-bold text-stone-900">
+            {loading ? "Loading..." : restaurantName}
+          </h1>
           <p className="text-sm text-stone-600">
             Simulate customer ordering without Twilio
           </p>
@@ -168,7 +185,7 @@ export function WhatsAppDemoChat() {
               B
             </div>
             <div>
-              <p className="font-semibold">{restaurantConfig.name}</p>
+              <p className="font-semibold">{restaurantName}</p>
               <p className="text-xs text-emerald-100">online - demo mode</p>
             </div>
           </div>

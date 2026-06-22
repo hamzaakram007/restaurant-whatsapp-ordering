@@ -6,6 +6,7 @@ import {
   notifyPaymentRejected,
 } from "@/lib/notifications";
 import { getOrderById, updateOrder } from "@/lib/store";
+import { requireBranchFromRequest, tenantErrorResponse } from "@/lib/tenant-context";
 
 const paymentSchema = z.object({
   action: z.enum(["approve", "reject"]),
@@ -18,40 +19,54 @@ type RouteContext = {
 };
 
 export async function POST(request: Request, context: RouteContext) {
-  const { id } = await context.params;
-  const order = await getOrderById(id);
+  try {
+    const { restaurant, branch } = await requireBranchFromRequest(request);
+    const restaurantId = restaurant.id;
+    const branchId = branch.id;
+    const { id } = await context.params;
+    const order = await getOrderById(restaurantId, branchId, id);
 
-  if (!order) {
-    return Response.json({ error: "Order not found" }, { status: 404 });
-  }
+    if (!order) {
+      return Response.json({ error: "Order not found" }, { status: 404 });
+    }
 
-  const body = paymentSchema.parse(await request.json());
+    const body = paymentSchema.parse(await request.json());
 
-  if (body.action === "approve") {
-    const updated = await updateOrder(id, {
-      status: "confirmed",
-      paymentStatus: "paid",
-      paymentVerifiedBy: body.verifiedBy,
-      paymentVerifiedAt: new Date().toISOString(),
-      paymentRejectionReason: undefined,
+    if (body.action === "approve") {
+      const updated = await updateOrder(restaurantId, branchId, id, {
+        status: "confirmed",
+        paymentStatus: "paid",
+        paymentVerifiedBy: body.verifiedBy,
+        paymentVerifiedAt: new Date().toISOString(),
+        paymentRejectionReason: undefined,
+      });
+
+      await notifyPaymentApproved(
+        restaurantId,
+        updated.customerPhone,
+        updated.orderNumber,
+        branchId,
+      );
+      return Response.json({ order: updated });
+    }
+
+    const updated = await updateOrder(restaurantId, branchId, id, {
+      status: "awaiting_payment",
+      paymentStatus: "rejected",
+      paymentRejectionReason: body.reason ?? "Payment could not be verified",
+      paymentScreenshotUrl: undefined,
     });
 
-    await notifyPaymentApproved(updated.customerPhone, updated.orderNumber);
+    await notifyPaymentRejected(
+      restaurantId,
+      updated.customerPhone,
+      updated.orderNumber,
+      updated.paymentRejectionReason,
+      branchId,
+    );
+
     return Response.json({ order: updated });
+  } catch (error) {
+    return tenantErrorResponse(error);
   }
-
-  const updated = await updateOrder(id, {
-    status: "awaiting_payment",
-    paymentStatus: "rejected",
-    paymentRejectionReason: body.reason ?? "Payment could not be verified",
-    paymentScreenshotUrl: undefined,
-  });
-
-  await notifyPaymentRejected(
-    updated.customerPhone,
-    updated.orderNumber,
-    updated.paymentRejectionReason,
-  );
-
-  return Response.json({ order: updated });
 }

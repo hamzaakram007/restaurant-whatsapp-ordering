@@ -1,8 +1,6 @@
-import { restaurantConfig } from "@/data/restaurant-config";
-
-export function formatMoney(cents: number) {
+export function formatMoney(cents: number, currency = "PKR") {
   const amount = cents / 100;
-  return `${restaurantConfig.currency} ${amount.toLocaleString("en-PK", {
+  return `${currency} ${amount.toLocaleString("en-PK", {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   })}`;

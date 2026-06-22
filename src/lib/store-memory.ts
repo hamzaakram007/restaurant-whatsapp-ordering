@@ -5,6 +5,22 @@ import {
   demoOrders,
 } from "@/data/demo-seed";
 import { seedCategories, seedMenuItems } from "@/data/seed-menu";
+import {
+  branchStoreKey,
+  DEFAULT_BRANCH_ID,
+} from "@/lib/branch-constants";
+import {
+  getEffectiveMenuItemById,
+  getEffectiveMenuItems,
+} from "@/lib/branch-menu";
+import { getNextBranchOrderNumber, resetBranchStoreForTests } from "@/lib/branch-store";
+import {
+  isOrderEditable,
+  recalculateOrderTotals,
+  shouldResetPaymentAfterEdit,
+} from "@/lib/order-edit";
+import { initMemoryStoresForTests, resetRestaurantStoreForTests } from "@/lib/restaurant-store";
+import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant-constants";
 import type {
   CartLine,
   Conversation,
@@ -20,19 +36,26 @@ import type {
   PaymentStatus,
 } from "@/lib/types";
 
-type StoreState = {
+type RestaurantStore = {
   customers: Customer[];
-  conversations: Conversation[];
-  carts: Record<string, CartLine[]>;
   categories: MenuCategory[];
   menuItems: MenuItem[];
+};
+
+type BranchStoreState = {
+  conversations: Conversation[];
+  carts: Record<string, CartLine[]>;
   orders: Order[];
   orderEvents: OrderEvent[];
-  nextOrderNumber: number;
+};
+
+type TenantStore = {
+  restaurantData: Record<string, RestaurantStore>;
+  branchData: Record<string, BranchStoreState>;
 };
 
 declare global {
-  var restaurantOrderingStore: StoreState | undefined;
+  var restaurantOrderingTenantStore: TenantStore | undefined;
 }
 
 const now = () => new Date().toISOString();
@@ -41,70 +64,129 @@ function shouldSeedDemoData() {
   return process.env.SEED_DEMO_DATA !== "false";
 }
 
-function emptyStore(): StoreState {
+function emptyRestaurantStore(): RestaurantStore {
   return {
     customers: [],
-    conversations: [],
-    carts: {},
-    categories: [...seedCategories],
-    menuItems: [...seedMenuItems],
-    orders: [],
-    orderEvents: [],
-    nextOrderNumber: 1001,
+    categories: [],
+    menuItems: [],
   };
 }
 
-export function seedDemoData(store: StoreState) {
-  store.customers = demoCustomers.map((customer) => ({ ...customer }));
-  store.orders = demoOrders.map((order) => ({
+function emptyBranchStore(): BranchStoreState {
+  return {
+    conversations: [],
+    carts: {},
+    orders: [],
+    orderEvents: [],
+  };
+}
+
+function seedMenuData(store: RestaurantStore) {
+  store.categories = seedCategories.map((category) => ({ ...category }));
+  store.menuItems = seedMenuItems.map((item) => ({ ...item }));
+  return store;
+}
+
+export function seedDemoData(branchStore: BranchStoreState) {
+  branchStore.orders = demoOrders.map((order) => ({
     ...order,
     items: order.items.map((item) => ({ ...item })),
   }));
-  store.orderEvents = demoOrderEvents.map((event) => ({ ...event }));
-  store.nextOrderNumber = 1006;
-  return store;
+  branchStore.orderEvents = demoOrderEvents.map((event) => ({ ...event }));
+  return branchStore;
 }
 
-function initialStore(): StoreState {
-  const store = emptyStore();
-  if (shouldSeedDemoData()) {
-    seedDemoData(store);
+function getGlobalTenantStore(): TenantStore {
+  if (!globalThis.restaurantOrderingTenantStore) {
+    globalThis.restaurantOrderingTenantStore = {
+      restaurantData: {},
+      branchData: {},
+    };
   }
-  return store;
+  return globalThis.restaurantOrderingTenantStore;
 }
 
-function getStore(): StoreState {
-  if (!globalThis.restaurantOrderingStore) {
-    globalThis.restaurantOrderingStore = initialStore();
+export function getRestaurantStore(restaurantId: string): RestaurantStore {
+  const global = getGlobalTenantStore();
+  if (!global.restaurantData[restaurantId]) {
+    const store = emptyRestaurantStore();
+    if (restaurantId === DEFAULT_RESTAURANT_ID) {
+      seedMenuData(store);
+      if (shouldSeedDemoData()) {
+        const customers = demoCustomers.map((customer) => ({ ...customer }));
+        store.customers = customers;
+      }
+    }
+    global.restaurantData[restaurantId] = store;
   }
-  return globalThis.restaurantOrderingStore;
+  return global.restaurantData[restaurantId];
+}
+
+/** @deprecated Use getRestaurantStore for catalog/customers; getBranchStore for operational data. */
+export function getTenantStore(restaurantId: string) {
+  return getRestaurantStore(restaurantId);
+}
+
+export function getBranchStore(restaurantId: string, branchId: string): BranchStoreState {
+  const global = getGlobalTenantStore();
+  const key = branchStoreKey(restaurantId, branchId);
+  if (!global.branchData[key]) {
+    const store = emptyBranchStore();
+    if (
+      restaurantId === DEFAULT_RESTAURANT_ID &&
+      branchId === DEFAULT_BRANCH_ID &&
+      shouldSeedDemoData()
+    ) {
+      seedDemoData(store);
+    }
+    global.branchData[key] = store;
+  }
+  return global.branchData[key];
 }
 
 export function resetStoreForTests() {
-  globalThis.restaurantOrderingStore = emptyStore();
+  globalThis.restaurantOrderingTenantStore = {
+    restaurantData: {},
+    branchData: {},
+  };
+  resetRestaurantStoreForTests();
+  resetBranchStoreForTests();
+  initMemoryStoresForTests();
 }
 
-export function resetDemoData() {
-  const store = emptyStore();
-  seedDemoData(store);
-  globalThis.restaurantOrderingStore = store;
+export function resetDemoData(restaurantId: string, branchId: string) {
+  const restaurantStore = getRestaurantStore(restaurantId);
+  restaurantStore.customers = demoCustomers.map((customer) => ({ ...customer }));
+
+  const branchStore = emptyBranchStore();
+  seedDemoData(branchStore);
+  getGlobalTenantStore().branchData[branchStoreKey(restaurantId, branchId)] = branchStore;
+
   return {
-    customers: store.customers.length,
-    orders: store.orders.length,
-    orderEvents: store.orderEvents.length,
+    customers: restaurantStore.customers.length,
+    orders: branchStore.orders.length,
+    orderEvents: branchStore.orderEvents.length,
   };
 }
 
-export function clearConversationForPhone(phone: string) {
-  const store = getStore();
+export function clearConversationForPhone(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+) {
+  const store = getBranchStore(restaurantId, branchId);
   store.conversations = store.conversations.filter(
     (conversation) => conversation.customerPhone !== phone,
   );
   delete store.carts[phone];
 }
 
-export function getDemoStats() {
-  const orders = getStore().orders;
+export function getDemoStats(restaurantId: string, branchId?: string) {
+  const orders = branchId
+    ? getBranchStore(restaurantId, branchId).orders
+    : Object.entries(getGlobalTenantStore().branchData)
+        .filter(([key]) => key.startsWith(`${restaurantId}:`))
+        .flatMap(([, store]) => store.orders);
   return {
     orderCount: orders.length,
     pendingPayments: orders.filter((order) => order.status === "payment_uploaded")
@@ -118,28 +200,36 @@ export function getDemoStats() {
   };
 }
 
-export function getCategories() {
-  return [...getStore().categories].sort((a, b) => a.sortOrder - b.sortOrder);
+export function getCategories(restaurantId: string) {
+  return [...getRestaurantStore(restaurantId).categories].sort(
+    (a, b) => a.sortOrder - b.sortOrder,
+  );
 }
 
-export function getMenuItems(categoryId?: string) {
-  const items = getStore().menuItems.filter((item) => item.available);
+export async function getMenuItems(
+  restaurantId: string,
+  branchId: string,
+  categoryId?: string,
+) {
+  return getEffectiveMenuItems(restaurantId, branchId, categoryId);
+}
+
+export function getAllMenuItems(restaurantId: string, categoryId?: string) {
+  const items = getRestaurantStore(restaurantId).menuItems;
   if (!categoryId) return items;
   return items.filter((item) => item.categoryId === categoryId);
 }
 
-export function getAllMenuItems(categoryId?: string) {
-  const items = getStore().menuItems;
-  if (!categoryId) return items;
-  return items.filter((item) => item.categoryId === categoryId);
+export async function getMenuItemById(
+  restaurantId: string,
+  branchId: string,
+  id: string,
+) {
+  return getEffectiveMenuItemById(restaurantId, branchId, id);
 }
 
-export function getMenuItemById(id: string) {
-  return getStore().menuItems.find((item) => item.id === id);
-}
-
-export function upsertMenuItem(item: MenuItem) {
-  const store = getStore();
+export function upsertMenuItem(restaurantId: string, item: MenuItem) {
+  const store = getRestaurantStore(restaurantId);
   const index = store.menuItems.findIndex((entry) => entry.id === item.id);
   if (index >= 0) {
     store.menuItems[index] = item;
@@ -149,8 +239,8 @@ export function upsertMenuItem(item: MenuItem) {
   return item;
 }
 
-export function getOrCreateCustomer(phone: string): Customer {
-  const store = getStore();
+export function getOrCreateCustomer(restaurantId: string, phone: string): Customer {
+  const store = getRestaurantStore(restaurantId);
   const existing = store.customers.find((customer) => customer.phone === phone);
   if (existing) return existing;
 
@@ -163,8 +253,12 @@ export function getOrCreateCustomer(phone: string): Customer {
   return customer;
 }
 
-export function getOrCreateConversation(phone: string): Conversation {
-  const store = getStore();
+export function getOrCreateConversation(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+): Conversation {
+  const store = getBranchStore(restaurantId, branchId);
   const existing = store.conversations.find(
     (conversation) => conversation.customerPhone === phone,
   );
@@ -184,12 +278,14 @@ export function getOrCreateConversation(phone: string): Conversation {
 }
 
 export function updateConversation(
+  restaurantId: string,
+  branchId: string,
   phone: string,
   patch: Partial<
     Pick<Conversation, "step" | "activeCategoryId" | "shownItemIds" | "context">
   >,
 ) {
-  const conversation = getOrCreateConversation(phone);
+  const conversation = getOrCreateConversation(restaurantId, branchId, phone);
   if (patch.context) {
     conversation.context = { ...conversation.context, ...patch.context };
   }
@@ -201,24 +297,47 @@ export function updateConversation(
   return conversation;
 }
 
-export function getConversationContext(phone: string): ConversationContext {
-  return getOrCreateConversation(phone).context;
+export function getConversationContext(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+): ConversationContext {
+  return getOrCreateConversation(restaurantId, branchId, phone).context;
 }
 
-export function setConversationContext(phone: string, context: ConversationContext) {
-  return updateConversation(phone, { context });
+export function setConversationContext(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+  context: ConversationContext,
+) {
+  return updateConversation(restaurantId, branchId, phone, { context });
 }
 
-export function getCart(phone: string): CartLine[] {
-  return getStore().carts[phone] ?? [];
+export function getCart(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+): CartLine[] {
+  return getBranchStore(restaurantId, branchId).carts[phone] ?? [];
 }
 
-export function setCart(phone: string, items: CartLine[]) {
-  getStore().carts[phone] = items;
+export function setCart(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+  items: CartLine[],
+) {
+  getBranchStore(restaurantId, branchId).carts[phone] = items;
 }
 
-export function addToCart(phone: string, line: CartLine) {
-  const cart = getCart(phone);
+export function addToCart(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+  line: CartLine,
+) {
+  const cart = getCart(restaurantId, branchId, phone);
   const lineKey = line.lineKey ?? line.menuItemId;
   const existing = cart.find((item) => (item.lineKey ?? item.menuItemId) === lineKey);
   if (existing) {
@@ -231,15 +350,19 @@ export function addToCart(phone: string, line: CartLine) {
       selectedOptions: line.selectedOptions ?? [],
     });
   }
-  setCart(phone, cart);
+  setCart(restaurantId, branchId, phone, cart);
   return cart;
 }
 
-export function clearCart(phone: string) {
-  delete getStore().carts[phone];
+export function clearCart(restaurantId: string, branchId: string, phone: string) {
+  delete getBranchStore(restaurantId, branchId).carts[phone];
 }
 
-export function findActiveOrderByPhone(phone: string) {
+export function findActiveOrderByPhone(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+) {
   const activeStatuses: OrderStatus[] = [
     "new",
     "cart_started",
@@ -253,31 +376,39 @@ export function findActiveOrderByPhone(phone: string) {
     "ready",
     "out_for_delivery",
   ];
-  return getStore().orders.find(
+  return getBranchStore(restaurantId, branchId).orders.find(
     (order) =>
       order.customerPhone === phone && activeStatuses.includes(order.status),
   );
 }
 
-export function findLatestOrderByPhone(phone: string) {
-  return [...getStore().orders]
+export function findLatestOrderByPhone(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+) {
+  return [...getBranchStore(restaurantId, branchId).orders]
     .filter((order) => order.customerPhone === phone)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 }
 
-export function createOrderFromCart(input: {
-  phone: string;
-  fulfillmentType: FulfillmentType;
-  deliveryAddress?: string;
-  pickupTime?: string;
-  deliveryFeeCents: number;
-}) {
-  const cart = getCart(input.phone);
+export async function createOrderFromCart(
+  restaurantId: string,
+  branchId: string,
+  input: {
+    phone: string;
+    fulfillmentType: FulfillmentType;
+    deliveryAddress?: string;
+    pickupTime?: string;
+    deliveryFeeCents: number;
+  },
+) {
+  const cart = getCart(restaurantId, branchId, input.phone);
   if (cart.length === 0) {
     throw new Error("Cart is empty");
   }
 
-  const store = getStore();
+  const store = getBranchStore(restaurantId, branchId);
   const subtotalCents = cart.reduce(
     (sum, item) => sum + item.unitPriceCents * item.quantity,
     0,
@@ -285,7 +416,7 @@ export function createOrderFromCart(input: {
   const deliveryFeeCents =
     input.fulfillmentType === "delivery" ? input.deliveryFeeCents : 0;
   const totalCents = subtotalCents + deliveryFeeCents;
-  const orderNumber = store.nextOrderNumber++;
+  const orderNumber = await getNextBranchOrderNumber(branchId);
 
   const order: Order = {
     id: randomUUID(),
@@ -305,12 +436,24 @@ export function createOrderFromCart(input: {
   };
 
   store.orders.unshift(order);
-  appendOrderEvent(order.id, "awaiting_payment", "Order created, awaiting payment");
-  clearCart(input.phone);
+  appendOrderEvent(
+    restaurantId,
+    branchId,
+    order.id,
+    "awaiting_payment",
+    "Order created, awaiting payment",
+  );
+  clearCart(restaurantId, branchId, input.phone);
   return order;
 }
 
-export function appendOrderEvent(orderId: string, status: OrderStatus, note?: string) {
+export function appendOrderEvent(
+  restaurantId: string,
+  branchId: string,
+  orderId: string,
+  status: OrderStatus,
+  note?: string,
+) {
   const event: OrderEvent = {
     id: randomUUID(),
     orderId,
@@ -318,11 +461,13 @@ export function appendOrderEvent(orderId: string, status: OrderStatus, note?: st
     note,
     createdAt: now(),
   };
-  getStore().orderEvents.unshift(event);
+  getBranchStore(restaurantId, branchId).orderEvents.unshift(event);
   return event;
 }
 
 export function updateOrder(
+  restaurantId: string,
+  branchId: string,
   orderId: string,
   patch: Partial<
     Pick<
@@ -336,27 +481,124 @@ export function updateOrder(
       | "kitchenAcknowledgedAt"
       | "deliveryAddress"
       | "pickupTime"
+      | "fulfillmentType"
+      | "notes"
+      | "items"
+      | "subtotalCents"
+      | "deliveryFeeCents"
+      | "totalCents"
     >
   >,
   eventNote?: string,
 ) {
-  const store = getStore();
+  const store = getBranchStore(restaurantId, branchId);
   const order = store.orders.find((entry) => entry.id === orderId);
   if (!order) throw new Error("Order not found");
 
   Object.assign(order, patch, { updatedAt: now() });
   if (patch.status) {
-    appendOrderEvent(order.id, patch.status, eventNote);
+    appendOrderEvent(restaurantId, branchId, order.id, patch.status, eventNote);
+  } else if (eventNote) {
+    appendOrderEvent(restaurantId, branchId, order.id, order.status, eventNote);
   }
   return order;
 }
 
-export function listOrders(filters?: {
-  status?: OrderStatus[];
-  paymentStatus?: PaymentStatus[];
-  limit?: number;
-}) {
-  let orders = [...getStore().orders];
+export function replaceOrderItems(
+  restaurantId: string,
+  branchId: string,
+  orderId: string,
+  items: CartLine[],
+  eventNote = "Order items updated",
+) {
+  const order = getOrderById(restaurantId, branchId, orderId);
+  if (!order) throw new Error("Order not found");
+  if (!isOrderEditable(order)) throw new Error("Order is not editable");
+
+  const deliveryFeeCents =
+    order.fulfillmentType === "delivery" ? order.deliveryFeeCents || 15000 : 0;
+  const totals = recalculateOrderTotals(items, order.fulfillmentType, deliveryFeeCents);
+  const resetPayment = shouldResetPaymentAfterEdit(order, totals.totalCents);
+
+  const patch: Parameters<typeof updateOrder>[3] = {
+    items: items.map((item) => ({ ...item })),
+    ...totals,
+  };
+
+  if (resetPayment) {
+    patch.paymentStatus = "payment_requested";
+    patch.status = order.paymentScreenshotUrl ? "payment_uploaded" : "awaiting_payment";
+    patch.paymentVerifiedBy = undefined;
+    patch.paymentVerifiedAt = undefined;
+  }
+
+  return updateOrder(restaurantId, branchId, orderId, patch, eventNote);
+}
+
+export function updateOrderDetails(
+  restaurantId: string,
+  branchId: string,
+  orderId: string,
+  patch: Partial<
+    Pick<Order, "deliveryAddress" | "pickupTime" | "fulfillmentType" | "notes">
+  >,
+  eventNote = "Order details updated",
+) {
+  const order = getOrderById(restaurantId, branchId, orderId);
+  if (!order) throw new Error("Order not found");
+  if (!isOrderEditable(order)) throw new Error("Order is not editable");
+
+  const fulfillmentType = patch.fulfillmentType ?? order.fulfillmentType;
+  const deliveryFeeCents =
+    fulfillmentType === "delivery" ? order.deliveryFeeCents || 15000 : 0;
+  const totals = recalculateOrderTotals(order.items, fulfillmentType, deliveryFeeCents);
+
+  return updateOrder(
+    restaurantId,
+    branchId,
+    orderId,
+    {
+      ...patch,
+      ...totals,
+    },
+    eventNote,
+  );
+}
+
+export function cancelOrder(
+  restaurantId: string,
+  branchId: string,
+  orderId: string,
+  eventNote = "Order cancelled",
+) {
+  const order = getOrderById(restaurantId, branchId, orderId);
+  if (!order) throw new Error("Order not found");
+  if (!isOrderEditable(order)) throw new Error("Order is not editable");
+  return updateOrder(restaurantId, branchId, orderId, { status: "cancelled" }, eventNote);
+}
+
+export function findEditableOrderByPhone(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+) {
+  const order =
+    findActiveOrderByPhone(restaurantId, branchId, phone) ??
+    findLatestOrderByPhone(restaurantId, branchId, phone);
+  if (!order || !isOrderEditable(order)) return undefined;
+  return order;
+}
+
+export function listOrders(
+  restaurantId: string,
+  branchId: string,
+  filters?: {
+    status?: OrderStatus[];
+    paymentStatus?: PaymentStatus[];
+    limit?: number;
+  },
+) {
+  let orders = [...getBranchStore(restaurantId, branchId).orders];
   if (filters?.status?.length) {
     orders = orders.filter((order) => filters.status!.includes(order.status));
   }
@@ -369,16 +611,34 @@ export function listOrders(filters?: {
   return orders.slice(0, filters?.limit ?? 100);
 }
 
-export function getOrderById(orderId: string) {
-  return getStore().orders.find((order) => order.id === orderId);
+export function getOrderById(
+  restaurantId: string,
+  branchId: string,
+  orderId: string,
+) {
+  return getBranchStore(restaurantId, branchId).orders.find(
+    (order) => order.id === orderId,
+  );
 }
 
-export function getOrderEvents(orderId: string) {
-  return getStore().orderEvents.filter((event) => event.orderId === orderId);
+export function getOrderEvents(
+  restaurantId: string,
+  branchId: string,
+  orderId: string,
+) {
+  return getBranchStore(restaurantId, branchId).orderEvents.filter(
+    (event) => event.orderId === orderId,
+  );
 }
 
-export function acknowledgeKitchenOrder(orderId: string) {
+export function acknowledgeKitchenOrder(
+  restaurantId: string,
+  branchId: string,
+  orderId: string,
+) {
   return updateOrder(
+    restaurantId,
+    branchId,
     orderId,
     {
       kitchenAcknowledgedAt: now(),
@@ -388,6 +648,11 @@ export function acknowledgeKitchenOrder(orderId: string) {
   );
 }
 
-export function setConversationStep(phone: string, step: ConversationStep) {
-  return updateConversation(phone, { step });
+export function setConversationStep(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+  step: ConversationStep,
+) {
+  return updateConversation(restaurantId, branchId, phone, { step });
 }

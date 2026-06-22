@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useTenant } from "@/components/TenantProvider";
 import { formatMoney } from "@/lib/format";
 import type { MenuCategory, MenuItem, MenuOptionChoice, MenuOptionGroup } from "@/lib/types";
 
@@ -29,10 +30,13 @@ function emptyGroup(): MenuOptionGroup {
 }
 
 export function MenuAdmin() {
+  const { config } = useTenant();
+  const currency = config?.currency ?? "PKR";
   const [items, setItems] = useState<MenuItem[]>([]);
   const [categories, setCategories] = useState<MenuCategory[]>([]);
   const [form, setForm] = useState<MenuItem>(emptyForm());
   const [editingId, setEditingId] = useState<string | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
 
   async function loadItems() {
     const response = await fetch("/api/admin/menu");
@@ -65,6 +69,25 @@ export function MenuAdmin() {
         choices: group.choices.map((choice) => ({ ...choice })),
       })),
     });
+    window.setTimeout(() => {
+      formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
+  }
+
+  function duplicateItem(item: MenuItem) {
+    setEditingId(null);
+    setForm({
+      ...item,
+      id: `${item.id}-copy`,
+      name: `${item.name} (copy)`,
+      optionGroups: item.optionGroups.map((group) => ({
+        ...group,
+        choices: group.choices.map((choice) => ({ ...choice })),
+      })),
+    });
+    window.setTimeout(() => {
+      formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
   }
 
   function updateGroup(index: number, patch: Partial<MenuOptionGroup>) {
@@ -178,7 +201,25 @@ export function MenuAdmin() {
         </button>
       </div>
 
-      <form onSubmit={saveItem} className="mb-10 space-y-6 rounded-2xl border bg-white p-6">
+      <form
+        ref={formRef}
+        onSubmit={saveItem}
+        className="mb-10 space-y-6 rounded-2xl border bg-white p-6"
+      >
+        {editingId ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-amber-950">
+            <p className="font-medium">
+              Editing: <span className="font-semibold">{form.name}</span>
+            </p>
+            <button
+              type="button"
+              onClick={startNew}
+              className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-sm font-medium"
+            >
+              Cancel edit
+            </button>
+          </div>
+        ) : null}
         <div className="grid gap-4 md:grid-cols-2">
           <input
             className="rounded-lg border px-3 py-2"
@@ -370,14 +411,20 @@ export function MenuAdmin() {
       <div className="space-y-3">
         <h2 className="text-xl font-semibold text-stone-900">Current menu</h2>
         {items.map((item) => (
-          <button
+          <div
             key={item.id}
-            type="button"
-            onClick={() => startEdit(item)}
-            className="w-full rounded-xl border border-stone-200 bg-white p-4 text-left transition hover:border-amber-300"
+            className={`w-full rounded-xl border bg-white p-4 text-left transition ${
+              editingId === item.id
+                ? "border-amber-400 ring-2 ring-amber-100"
+                : "border-stone-200 hover:border-amber-300"
+            }`}
           >
             <div className="flex items-start justify-between gap-3">
-              <div>
+              <button
+                type="button"
+                onClick={() => startEdit(item)}
+                className="min-w-0 flex-1 text-left"
+              >
                 <div className="flex items-center gap-2">
                   <h3 className="font-semibold text-stone-900">{item.name}</h3>
                   {!item.available ? (
@@ -387,20 +434,39 @@ export function MenuAdmin() {
                   ) : null}
                   {item.optionGroups.length > 0 ? (
                     <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-900">
-                      {item.optionGroups.length} option group{item.optionGroups.length === 1 ? "" : "s"}
+                      {item.optionGroups.length} option group
+                      {item.optionGroups.length === 1 ? "" : "s"}
                     </span>
                   ) : null}
                 </div>
                 <p className="text-sm text-stone-500">{item.description}</p>
-              </div>
-              <div className="text-right text-sm">
-                <p className="font-medium text-stone-900">
-                  Base {formatMoney(item.priceCents)}
-                </p>
-                <p className="text-stone-500">{item.prepMinutes} min prep</p>
+              </button>
+              <div className="flex shrink-0 flex-col items-end gap-2 text-sm">
+                <div className="text-right">
+                  <p className="font-medium text-stone-900">
+                    Base {formatMoney(item.priceCents, currency)}
+                  </p>
+                  <p className="text-stone-500">{item.prepMinutes} min prep</p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => startEdit(item)}
+                    className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => duplicateItem(item)}
+                    className="rounded-lg border px-3 py-1.5 text-xs font-medium text-stone-700"
+                  >
+                    Duplicate
+                  </button>
+                </div>
               </div>
             </div>
-          </button>
+          </div>
         ))}
       </div>
     </div>

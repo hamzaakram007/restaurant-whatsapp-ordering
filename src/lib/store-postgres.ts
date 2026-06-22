@@ -5,7 +5,20 @@ import {
   demoOrders,
 } from "@/data/demo-seed";
 import { seedCategories, seedMenuItems } from "@/data/seed-menu";
+import { DEFAULT_BRANCH_ID } from "@/lib/branch-constants";
+import {
+  getEffectiveMenuItemById,
+  getEffectiveMenuItems,
+} from "@/lib/branch-menu";
+import { getNextBranchOrderNumber } from "@/lib/branch-store";
 import { getSql } from "@/lib/db";
+import { getRestaurantById } from "@/lib/restaurant-store";
+import {
+  isOrderEditable,
+  recalculateOrderTotals,
+  shouldResetPaymentAfterEdit,
+} from "@/lib/order-edit";
+import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant-constants";
 import type {
   CartLine,
   Conversation,
@@ -146,24 +159,29 @@ async function loadOrder(row: OrderRow) {
   return mapOrder(row, items);
 }
 
-async function ensureMenuSeeded() {
+async function ensureMenuSeeded(restaurantId: string) {
   const sql = getSql();
-  const rows = await sql`select count(*)::int as count from menu_categories`;
+  const rows = await sql`
+    select count(*)::int as count
+    from menu_categories
+    where restaurant_id = ${restaurantId}
+  `;
   if ((rows[0]?.count as number) > 0) return;
 
   for (const category of seedCategories) {
     await sql`
-      insert into menu_categories (id, name, sort_order)
-      values (${category.id}, ${category.name}, ${category.sortOrder})
-      on conflict (id) do nothing
+      insert into menu_categories (restaurant_id, id, name, sort_order)
+      values (${restaurantId}, ${category.id}, ${category.name}, ${category.sortOrder})
+      on conflict (restaurant_id, id) do nothing
     `;
   }
 
   for (const item of seedMenuItems) {
     await sql`
       insert into menu_items (
-        id, category_id, name, description, price_cents, available, prep_minutes, option_groups, updated_at
+        restaurant_id, id, category_id, name, description, price_cents, available, prep_minutes, option_groups, updated_at
       ) values (
+        ${restaurantId},
         ${item.id},
         ${item.categoryId},
         ${item.name},
@@ -174,34 +192,50 @@ async function ensureMenuSeeded() {
         ${JSON.stringify(item.optionGroups)}::jsonb,
         ${now()}
       )
-      on conflict (id) do nothing
+      on conflict (restaurant_id, id) do nothing
     `;
   }
 }
 
-async function nextOrderNumber() {
+export async function resetDemoData(restaurantId: string, branchId: string) {
   const sql = getSql();
-  const rows = await sql`
-    update order_number_seq
-    set next_order_number = next_order_number + 1
-    where id = 1
-    returning next_order_number - 1 as order_number
-  `;
-  return rows[0]?.order_number as number;
-}
 
-export async function resetDemoData() {
-  const sql = getSql();
-  await sql`delete from order_events`;
-  await sql`delete from order_items`;
-  await sql`delete from orders`;
-  await sql`delete from customers where id like 'demo-%'`;
-  await sql`update order_number_seq set next_order_number = 1006 where id = 1`;
+  await sql`
+    delete from order_events
+    where order_id in (
+      select id from orders where restaurant_id = ${restaurantId} and branch_id = ${branchId}
+    )
+  `;
+  await sql`
+    delete from order_items
+    where order_id in (
+      select id from orders where restaurant_id = ${restaurantId} and branch_id = ${branchId}
+    )
+  `;
+  await sql`
+    delete from orders where restaurant_id = ${restaurantId} and branch_id = ${branchId}
+  `;
+  await sql`
+    delete from customers
+    where restaurant_id = ${restaurantId} and id like 'demo-%'
+  `;
+  await sql`
+    update branch_order_number_seq
+    set next_order_number = 1006
+    where branch_id = ${branchId}
+  `;
 
   for (const customer of demoCustomers) {
     await sql`
-      insert into customers (id, phone, name, default_address, created_at)
-      values (${customer.id}, ${customer.phone}, ${customer.name ?? null}, ${customer.defaultAddress ?? null}, ${customer.createdAt})
+      insert into customers (id, restaurant_id, phone, name, default_address, created_at)
+      values (
+        ${customer.id},
+        ${restaurantId},
+        ${customer.phone},
+        ${customer.name ?? null},
+        ${customer.defaultAddress ?? null},
+        ${customer.createdAt}
+      )
       on conflict (id) do nothing
     `;
   }
@@ -209,12 +243,14 @@ export async function resetDemoData() {
   for (const order of demoOrders) {
     await sql`
       insert into orders (
-        id, order_number, customer_phone, customer_name, status, payment_status,
+        id, restaurant_id, branch_id, order_number, customer_phone, customer_name, status, payment_status,
         fulfillment_type, delivery_address, pickup_time, subtotal_cents, delivery_fee_cents,
         total_cents, payment_screenshot_url, payment_verified_by, payment_verified_at,
         payment_rejection_reason, kitchen_acknowledged_at, created_at, updated_at
       ) values (
         ${order.id},
+        ${restaurantId},
+        ${branchId},
         ${order.orderNumber},
         ${order.customerPhone},
         ${order.customerName ?? null},
@@ -268,22 +304,43 @@ export async function resetDemoData() {
   };
 }
 
-export async function clearConversationForPhone(phone: string) {
+export async function clearConversationForPhone(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+) {
   const sql = getSql();
-  await sql`delete from conversations where customer_phone = ${phone}`;
-  await sql`delete from carts where customer_phone = ${phone}`;
+  await sql`
+    delete from conversations
+    where restaurant_id = ${restaurantId} and branch_id = ${branchId} and customer_phone = ${phone}
+  `;
+  await sql`
+    delete from carts
+    where restaurant_id = ${restaurantId} and branch_id = ${branchId} and customer_phone = ${phone}
+  `;
 }
 
-export async function getDemoStats() {
+export async function getDemoStats(restaurantId: string, branchId?: string) {
   const sql = getSql();
-  const rows = await sql`
-    select
-      count(*)::int as order_count,
-      count(*) filter (where status = 'payment_uploaded')::int as pending_payments,
-      count(*) filter (where status in ('confirmed','in_kitchen','ready','out_for_delivery'))::int as active_orders,
-      count(*) filter (where status = 'completed')::int as completed_today
-    from orders
-  `;
+  const rows = branchId
+    ? await sql`
+        select
+          count(*)::int as order_count,
+          count(*) filter (where status = 'payment_uploaded')::int as pending_payments,
+          count(*) filter (where status in ('confirmed','in_kitchen','ready','out_for_delivery'))::int as active_orders,
+          count(*) filter (where status = 'completed')::int as completed_today
+        from orders
+        where restaurant_id = ${restaurantId} and branch_id = ${branchId}
+      `
+    : await sql`
+        select
+          count(*)::int as order_count,
+          count(*) filter (where status = 'payment_uploaded')::int as pending_payments,
+          count(*) filter (where status in ('confirmed','in_kitchen','ready','out_for_delivery'))::int as active_orders,
+          count(*) filter (where status = 'completed')::int as completed_today
+        from orders
+        where restaurant_id = ${restaurantId}
+      `;
   const row = rows[0] as {
     order_count: number;
     pending_payments: number;
@@ -298,10 +355,15 @@ export async function getDemoStats() {
   };
 }
 
-export async function getCategories() {
-  await ensureMenuSeeded();
+export async function getCategories(restaurantId: string) {
+  await ensureMenuSeeded(restaurantId);
   const sql = getSql();
-  const rows = await sql`select id, name, sort_order from menu_categories order by sort_order asc`;
+  const rows = await sql`
+    select id, name, sort_order
+    from menu_categories
+    where restaurant_id = ${restaurantId}
+    order by sort_order asc
+  `;
   return rows.map(
     (row) =>
       ({
@@ -312,79 +374,64 @@ export async function getCategories() {
   );
 }
 
-export async function getMenuItems(categoryId?: string) {
-  await ensureMenuSeeded();
+export async function getMenuItems(
+  restaurantId: string,
+  branchId: string,
+  categoryId?: string,
+) {
+  await ensureMenuSeeded(restaurantId);
+  return getEffectiveMenuItems(restaurantId, branchId, categoryId);
+}
+
+export async function getAllMenuItems(restaurantId: string, categoryId?: string) {
+  await ensureMenuSeeded(restaurantId);
   const sql = getSql();
   const rows = categoryId
     ? await sql`
         select id, category_id, name, description, price_cents, available, prep_minutes, option_groups, image_url
         from menu_items
-        where available = true and category_id = ${categoryId}
+        where restaurant_id = ${restaurantId} and category_id = ${categoryId}
         order by name asc
       `
     : await sql`
         select id, category_id, name, description, price_cents, available, prep_minutes, option_groups, image_url
         from menu_items
-        where available = true
+        where restaurant_id = ${restaurantId}
         order by name asc
       `;
 
   return rows.map((row) => mapMenuItemRow(row as Record<string, unknown>));
 }
 
-export async function getAllMenuItems(categoryId?: string) {
-  await ensureMenuSeeded();
-  const sql = getSql();
-  const rows = categoryId
-    ? await sql`
-        select id, category_id, name, description, price_cents, available, prep_minutes, option_groups, image_url
-        from menu_items
-        where category_id = ${categoryId}
-        order by name asc
-      `
-    : await sql`
-        select id, category_id, name, description, price_cents, available, prep_minutes, option_groups, image_url
-        from menu_items
-        order by name asc
-      `;
-
-  return rows.map((row) => mapMenuItemRow(row as Record<string, unknown>));
+export async function getMenuItemById(
+  restaurantId: string,
+  branchId: string,
+  id: string,
+) {
+  await ensureMenuSeeded(restaurantId);
+  return getEffectiveMenuItemById(restaurantId, branchId, id);
 }
 
-export async function getMenuItemById(id: string) {
-  await ensureMenuSeeded();
+export async function getMenuItemByIdAdmin(restaurantId: string, id: string) {
+  await ensureMenuSeeded(restaurantId);
   const sql = getSql();
   const rows = await sql`
     select id, category_id, name, description, price_cents, available, prep_minutes, option_groups, image_url
     from menu_items
-    where id = ${id}
-    limit 1
-  `;
-  if (!rows[0]) return undefined;
-  const item = mapMenuItemRow(rows[0] as Record<string, unknown>);
-  if (!item.available) return undefined;
-  return item;
-}
-
-export async function getMenuItemByIdAdmin(id: string) {
-  await ensureMenuSeeded();
-  const sql = getSql();
-  const rows = await sql`
-    select id, category_id, name, description, price_cents, available, prep_minutes, option_groups, image_url
-    from menu_items
-    where id = ${id}
+    where restaurant_id = ${restaurantId} and id = ${id}
     limit 1
   `;
   if (!rows[0]) return undefined;
   return mapMenuItemRow(rows[0] as Record<string, unknown>);
 }
 
-export async function upsertMenuItem(item: MenuItem) {
+export async function upsertMenuItem(restaurantId: string, item: MenuItem) {
   const sql = getSql();
   await sql`
     insert into menu_items (
-      id, category_id, name, description, price_cents, available, prep_minutes, option_groups, image_url, updated_at
+      restaurant_id, id, category_id, name, description, price_cents, available, prep_minutes, option_groups, image_url, updated_at
     ) values (
+      ${restaurantId},
       ${item.id},
       ${item.categoryId},
       ${item.name},
@@ -396,7 +443,7 @@ export async function upsertMenuItem(item: MenuItem) {
       ${item.imageUrl ?? null},
       ${now()}
     )
-    on conflict (id) do update set
+    on conflict (restaurant_id, id) do update set
       category_id = excluded.category_id,
       name = excluded.name,
       description = excluded.description,
@@ -410,9 +457,17 @@ export async function upsertMenuItem(item: MenuItem) {
   return item;
 }
 
-export async function getOrCreateCustomer(phone: string): Promise<Customer> {
+export async function getOrCreateCustomer(
+  restaurantId: string,
+  phone: string,
+): Promise<Customer> {
   const sql = getSql();
-  const existing = await sql`select id, phone, name, default_address, created_at from customers where phone = ${phone} limit 1`;
+  const existing = await sql`
+    select id, phone, name, default_address, created_at
+    from customers
+    where restaurant_id = ${restaurantId} and phone = ${phone}
+    limit 1
+  `;
   if (existing[0]) {
     const row = existing[0];
     return {
@@ -427,18 +482,22 @@ export async function getOrCreateCustomer(phone: string): Promise<Customer> {
   const id = randomUUID();
   const createdAt = now();
   await sql`
-    insert into customers (id, phone, created_at)
-    values (${id}, ${phone}, ${createdAt})
+    insert into customers (id, restaurant_id, phone, created_at)
+    values (${id}, ${restaurantId}, ${phone}, ${createdAt})
   `;
   return { id, phone, createdAt };
 }
 
-export async function getOrCreateConversation(phone: string): Promise<Conversation> {
+export async function getOrCreateConversation(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+): Promise<Conversation> {
   const sql = getSql();
   const existing = await sql`
     select id, customer_phone, step, active_category_id, shown_item_ids, context, created_at, updated_at
     from conversations
-    where customer_phone = ${phone}
+    where restaurant_id = ${restaurantId} and branch_id = ${branchId} and customer_phone = ${phone}
     limit 1
   `;
 
@@ -447,20 +506,22 @@ export async function getOrCreateConversation(phone: string): Promise<Conversati
   }
 
   const rows = await sql`
-    insert into conversations (customer_phone, step, shown_item_ids, context, created_at, updated_at)
-    values (${phone}, 'idle', ${[]}, ${JSON.stringify({})}::jsonb, ${now()}, ${now()})
+    insert into conversations (restaurant_id, branch_id, customer_phone, step, shown_item_ids, context, created_at, updated_at)
+    values (${restaurantId}, ${branchId}, ${phone}, 'idle', ${[]}, ${JSON.stringify({})}::jsonb, ${now()}, ${now()})
     returning id, customer_phone, step, active_category_id, shown_item_ids, context, created_at, updated_at
   `;
   return mapConversationRow(rows[0] as Record<string, unknown>);
 }
 
 export async function updateConversation(
+  restaurantId: string,
+  branchId: string,
   phone: string,
   patch: Partial<
     Pick<Conversation, "step" | "activeCategoryId" | "shownItemIds" | "context">
   >,
 ) {
-  const conversation = await getOrCreateConversation(phone);
+  const conversation = await getOrCreateConversation(restaurantId, branchId, phone);
   const sql = getSql();
   const nextContext = patch.context
     ? { ...conversation.context, ...patch.context }
@@ -473,40 +534,68 @@ export async function updateConversation(
       shown_item_ids = ${patch.shownItemIds ?? conversation.shownItemIds},
       context = ${JSON.stringify(nextContext)}::jsonb,
       updated_at = ${now()}
-    where customer_phone = ${phone}
+    where restaurant_id = ${restaurantId} and branch_id = ${branchId} and customer_phone = ${phone}
     returning id, customer_phone, step, active_category_id, shown_item_ids, context, created_at, updated_at
   `;
   return mapConversationRow(rows[0] as Record<string, unknown>);
 }
 
-export async function getConversationContext(phone: string) {
-  return (await getOrCreateConversation(phone)).context;
+export async function getConversationContext(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+) {
+  return (await getOrCreateConversation(restaurantId, branchId, phone)).context;
 }
 
-export async function setConversationContext(phone: string, context: ConversationContext) {
-  return updateConversation(phone, { context });
+export async function setConversationContext(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+  context: ConversationContext,
+) {
+  return updateConversation(restaurantId, branchId, phone, { context });
 }
 
-export async function getCart(phone: string): Promise<CartLine[]> {
+export async function getCart(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+): Promise<CartLine[]> {
   const sql = getSql();
-  const rows = await sql`select lines from carts where customer_phone = ${phone} limit 1`;
+  const rows = await sql`
+    select lines
+    from carts
+    where restaurant_id = ${restaurantId} and branch_id = ${branchId} and customer_phone = ${phone}
+    limit 1
+  `;
   if (!rows[0]) return [];
   return (rows[0].lines as CartLine[]) ?? [];
 }
 
-export async function setCart(phone: string, items: CartLine[]) {
+export async function setCart(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+  items: CartLine[],
+) {
   const sql = getSql();
   await sql`
-    insert into carts (customer_phone, lines, updated_at)
-    values (${phone}, ${JSON.stringify(items)}::jsonb, ${now()})
-    on conflict (customer_phone) do update
+    insert into carts (restaurant_id, branch_id, customer_phone, lines, updated_at)
+    values (${restaurantId}, ${branchId}, ${phone}, ${JSON.stringify(items)}::jsonb, ${now()})
+    on conflict (restaurant_id, branch_id, customer_phone) do update
       set lines = excluded.lines, updated_at = excluded.updated_at
   `;
   return items;
 }
 
-export async function addToCart(phone: string, line: CartLine) {
-  const cart = await getCart(phone);
+export async function addToCart(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+  line: CartLine,
+) {
+  const cart = await getCart(restaurantId, branchId, phone);
   const lineKey = line.lineKey ?? line.menuItemId;
   const existing = cart.find((item) => (item.lineKey ?? item.menuItemId) === lineKey);
   if (existing) {
@@ -519,12 +608,19 @@ export async function addToCart(phone: string, line: CartLine) {
       selectedOptions: line.selectedOptions ?? [],
     });
   }
-  return setCart(phone, cart);
+  return setCart(restaurantId, branchId, phone, cart);
 }
 
-export async function clearCart(phone: string) {
+export async function clearCart(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+) {
   const sql = getSql();
-  await sql`delete from carts where customer_phone = ${phone}`;
+  await sql`
+    delete from carts
+    where restaurant_id = ${restaurantId} and branch_id = ${branchId} and customer_phone = ${phone}
+  `;
 }
 
 const activeStatuses: OrderStatus[] = [
@@ -541,12 +637,19 @@ const activeStatuses: OrderStatus[] = [
   "out_for_delivery",
 ];
 
-export async function findActiveOrderByPhone(phone: string) {
+export async function findActiveOrderByPhone(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+) {
   const sql = getSql();
   const rows = await sql`
     select *
     from orders
-    where customer_phone = ${phone} and status = any(${activeStatuses})
+    where restaurant_id = ${restaurantId}
+      and branch_id = ${branchId}
+      and customer_phone = ${phone}
+      and status = any(${activeStatuses})
     order by created_at desc
     limit 1
   `;
@@ -554,11 +657,15 @@ export async function findActiveOrderByPhone(phone: string) {
   return loadOrder(rows[0] as OrderRow);
 }
 
-export async function findLatestOrderByPhone(phone: string) {
+export async function findLatestOrderByPhone(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+) {
   const sql = getSql();
   const rows = await sql`
     select * from orders
-    where customer_phone = ${phone}
+    where restaurant_id = ${restaurantId} and branch_id = ${branchId} and customer_phone = ${phone}
     order by created_at desc
     limit 1
   `;
@@ -566,14 +673,18 @@ export async function findLatestOrderByPhone(phone: string) {
   return loadOrder(rows[0] as OrderRow);
 }
 
-export async function createOrderFromCart(input: {
-  phone: string;
-  fulfillmentType: FulfillmentType;
-  deliveryAddress?: string;
-  pickupTime?: string;
-  deliveryFeeCents: number;
-}) {
-  const cart = await getCart(input.phone);
+export async function createOrderFromCart(
+  restaurantId: string,
+  branchId: string,
+  input: {
+    phone: string;
+    fulfillmentType: FulfillmentType;
+    deliveryAddress?: string;
+    pickupTime?: string;
+    deliveryFeeCents: number;
+  },
+) {
+  const cart = await getCart(restaurantId, branchId, input.phone);
   if (cart.length === 0) throw new Error("Cart is empty");
 
   const subtotalCents = cart.reduce(
@@ -583,18 +694,20 @@ export async function createOrderFromCart(input: {
   const deliveryFeeCents =
     input.fulfillmentType === "delivery" ? input.deliveryFeeCents : 0;
   const totalCents = subtotalCents + deliveryFeeCents;
-  const orderNumber = await nextOrderNumber();
+  const orderNumber = await getNextBranchOrderNumber(branchId);
   const orderId = randomUUID();
   const createdAt = now();
   const sql = getSql();
 
   await sql`
     insert into orders (
-      id, order_number, customer_phone, status, payment_status, fulfillment_type,
+      id, restaurant_id, branch_id, order_number, customer_phone, status, payment_status, fulfillment_type,
       delivery_address, pickup_time, subtotal_cents, delivery_fee_cents, total_cents,
       created_at, updated_at
     ) values (
       ${orderId},
+      ${restaurantId},
+      ${branchId},
       ${orderNumber},
       ${input.phone},
       'awaiting_payment',
@@ -625,14 +738,30 @@ export async function createOrderFromCart(input: {
     `;
   }
 
-  await appendOrderEvent(orderId, "awaiting_payment", "Order created, awaiting payment");
-  await clearCart(input.phone);
+  await appendOrderEvent(
+    restaurantId,
+    branchId,
+    orderId,
+    "awaiting_payment",
+    "Order created, awaiting payment",
+  );
+  await clearCart(restaurantId, branchId, input.phone);
 
-  const rows = await sql`select * from orders where id = ${orderId} limit 1`;
+  const rows = await sql`
+    select * from orders
+    where id = ${orderId} and restaurant_id = ${restaurantId} and branch_id = ${branchId}
+    limit 1
+  `;
   return loadOrder(rows[0] as OrderRow);
 }
 
-export async function appendOrderEvent(orderId: string, status: OrderStatus, note?: string) {
+export async function appendOrderEvent(
+  restaurantId: string,
+  branchId: string,
+  orderId: string,
+  status: OrderStatus,
+  note?: string,
+) {
   const sql = getSql();
   const event: OrderEvent = {
     id: randomUUID(),
@@ -643,12 +772,16 @@ export async function appendOrderEvent(orderId: string, status: OrderStatus, not
   };
   await sql`
     insert into order_events (id, order_id, status, note, created_at)
-    values (${event.id}, ${event.orderId}, ${event.status}, ${event.note ?? null}, ${event.createdAt})
+    select ${event.id}, ${event.orderId}, ${event.status}, ${event.note ?? null}, ${event.createdAt}
+    from orders
+    where id = ${orderId} and restaurant_id = ${restaurantId} and branch_id = ${branchId}
   `;
   return event;
 }
 
 export async function updateOrder(
+  restaurantId: string,
+  branchId: string,
   orderId: string,
   patch: Partial<
     Pick<
@@ -662,12 +795,26 @@ export async function updateOrder(
       | "kitchenAcknowledgedAt"
       | "deliveryAddress"
       | "pickupTime"
+      | "fulfillmentType"
+      | "notes"
+      | "subtotalCents"
+      | "deliveryFeeCents"
+      | "totalCents"
     >
   >,
   eventNote?: string,
 ) {
-  const existing = await getOrderById(orderId);
+  const existing = await getOrderById(restaurantId, branchId, orderId);
   if (!existing) throw new Error("Order not found");
+
+  const paymentVerifiedBy =
+    "paymentVerifiedBy" in patch
+      ? (patch.paymentVerifiedBy ?? null)
+      : (existing.paymentVerifiedBy ?? null);
+  const paymentVerifiedAt =
+    "paymentVerifiedAt" in patch
+      ? (patch.paymentVerifiedAt ?? null)
+      : (existing.paymentVerifiedAt ?? null);
 
   const sql = getSql();
   await sql`
@@ -676,30 +823,143 @@ export async function updateOrder(
       status = ${patch.status ?? existing.status},
       payment_status = ${patch.paymentStatus ?? existing.paymentStatus},
       payment_screenshot_url = ${patch.paymentScreenshotUrl ?? existing.paymentScreenshotUrl ?? null},
-      payment_verified_by = ${patch.paymentVerifiedBy ?? existing.paymentVerifiedBy ?? null},
-      payment_verified_at = ${patch.paymentVerifiedAt ?? existing.paymentVerifiedAt ?? null},
+      payment_verified_by = ${paymentVerifiedBy},
+      payment_verified_at = ${paymentVerifiedAt},
       payment_rejection_reason = ${patch.paymentRejectionReason ?? existing.paymentRejectionReason ?? null},
       kitchen_acknowledged_at = ${patch.kitchenAcknowledgedAt ?? existing.kitchenAcknowledgedAt ?? null},
       delivery_address = ${patch.deliveryAddress ?? existing.deliveryAddress ?? null},
       pickup_time = ${patch.pickupTime ?? existing.pickupTime ?? null},
+      fulfillment_type = ${patch.fulfillmentType ?? existing.fulfillmentType},
+      notes = ${patch.notes ?? existing.notes ?? null},
+      subtotal_cents = ${patch.subtotalCents ?? existing.subtotalCents},
+      delivery_fee_cents = ${patch.deliveryFeeCents ?? existing.deliveryFeeCents},
+      total_cents = ${patch.totalCents ?? existing.totalCents},
       updated_at = ${now()}
-    where id = ${orderId}
+    where id = ${orderId} and restaurant_id = ${restaurantId} and branch_id = ${branchId}
   `;
 
   if (patch.status) {
-    await appendOrderEvent(orderId, patch.status, eventNote);
+    await appendOrderEvent(restaurantId, branchId, orderId, patch.status, eventNote);
+  } else if (eventNote) {
+    await appendOrderEvent(restaurantId, branchId, orderId, patch.status ?? existing.status, eventNote);
   }
 
-  const updated = await getOrderById(orderId);
+  const updated = await getOrderById(restaurantId, branchId, orderId);
   if (!updated) throw new Error("Order not found after update");
   return updated;
 }
 
-export async function listOrders(filters?: {
-  status?: OrderStatus[];
-  paymentStatus?: PaymentStatus[];
-  limit?: number;
-}) {
+export async function replaceOrderItems(
+  restaurantId: string,
+  branchId: string,
+  orderId: string,
+  items: CartLine[],
+  eventNote = "Order items updated",
+) {
+  const order = await getOrderById(restaurantId, branchId, orderId);
+  if (!order) throw new Error("Order not found");
+  if (!isOrderEditable(order)) throw new Error("Order is not editable");
+
+  const restaurant = await getRestaurantById(restaurantId);
+  const configuredFee = restaurant?.deliveryFeeCents ?? 15000;
+  const deliveryFeeCents =
+    order.fulfillmentType === "delivery" ? order.deliveryFeeCents || configuredFee : 0;
+  const totals = recalculateOrderTotals(items, order.fulfillmentType, deliveryFeeCents);
+  const resetPayment = shouldResetPaymentAfterEdit(order, totals.totalCents);
+  const sql = getSql();
+
+  await sql`delete from order_items where order_id = ${orderId}`;
+  for (const item of items) {
+    await sql`
+      insert into order_items (order_id, menu_item_id, name, quantity, unit_price_cents, selected_options, notes)
+      values (
+        ${orderId},
+        ${item.menuItemId},
+        ${item.name},
+        ${item.quantity},
+        ${item.unitPriceCents},
+        ${JSON.stringify(item.selectedOptions ?? [])}::jsonb,
+        ${item.notes ?? null}
+      )
+    `;
+  }
+
+  const patch: Parameters<typeof updateOrder>[3] = { ...totals };
+  if (resetPayment) {
+    patch.paymentStatus = "payment_requested";
+    patch.status = order.paymentScreenshotUrl ? "payment_uploaded" : "awaiting_payment";
+    patch.paymentVerifiedBy = undefined;
+    patch.paymentVerifiedAt = undefined;
+  }
+
+  return updateOrder(restaurantId, branchId, orderId, patch, eventNote);
+}
+
+export async function updateOrderDetails(
+  restaurantId: string,
+  branchId: string,
+  orderId: string,
+  patch: Partial<
+    Pick<Order, "deliveryAddress" | "pickupTime" | "fulfillmentType" | "notes">
+  >,
+  eventNote = "Order details updated",
+) {
+  const order = await getOrderById(restaurantId, branchId, orderId);
+  if (!order) throw new Error("Order not found");
+  if (!isOrderEditable(order)) throw new Error("Order is not editable");
+
+  const fulfillmentType = patch.fulfillmentType ?? order.fulfillmentType;
+  const restaurant = await getRestaurantById(restaurantId);
+  const configuredFee = restaurant?.deliveryFeeCents ?? 15000;
+  const deliveryFeeCents =
+    fulfillmentType === "delivery" ? order.deliveryFeeCents || configuredFee : 0;
+  const totals = recalculateOrderTotals(order.items, fulfillmentType, deliveryFeeCents);
+
+  return updateOrder(
+    restaurantId,
+    branchId,
+    orderId,
+    {
+      ...patch,
+      ...totals,
+    },
+    eventNote,
+  );
+}
+
+export async function cancelOrder(
+  restaurantId: string,
+  branchId: string,
+  orderId: string,
+  eventNote = "Order cancelled",
+) {
+  const order = await getOrderById(restaurantId, branchId, orderId);
+  if (!order) throw new Error("Order not found");
+  if (!isOrderEditable(order)) throw new Error("Order is not editable");
+  return updateOrder(restaurantId, branchId, orderId, { status: "cancelled" }, eventNote);
+}
+
+export async function findEditableOrderByPhone(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+) {
+  const order =
+    (await findActiveOrderByPhone(restaurantId, branchId, phone)) ??
+    (await findLatestOrderByPhone(restaurantId, branchId, phone));
+  if (!order || !isOrderEditable(order)) return undefined;
+  return order;
+}
+
+export async function listOrders(
+  restaurantId: string,
+  branchId: string,
+  filters?: {
+    status?: OrderStatus[];
+    paymentStatus?: PaymentStatus[];
+    limit?: number;
+  },
+) {
   const sql = getSql();
   const limit = filters?.limit ?? 100;
   let rows;
@@ -707,13 +967,14 @@ export async function listOrders(filters?: {
   if (filters?.status?.length) {
     rows = await sql`
       select * from orders
-      where status = any(${filters.status})
+      where restaurant_id = ${restaurantId} and branch_id = ${branchId} and status = any(${filters.status})
       order by created_at desc
       limit ${limit}
     `;
   } else {
     rows = await sql`
       select * from orders
+      where restaurant_id = ${restaurantId} and branch_id = ${branchId}
       order by created_at desc
       limit ${limit}
     `;
@@ -730,20 +991,33 @@ export async function listOrders(filters?: {
   return orders;
 }
 
-export async function getOrderById(orderId: string) {
+export async function getOrderById(
+  restaurantId: string,
+  branchId: string,
+  orderId: string,
+) {
   const sql = getSql();
-  const rows = await sql`select * from orders where id = ${orderId} limit 1`;
+  const rows = await sql`
+    select * from orders
+    where id = ${orderId} and restaurant_id = ${restaurantId} and branch_id = ${branchId}
+    limit 1
+  `;
   if (!rows[0]) return undefined;
   return loadOrder(rows[0] as OrderRow);
 }
 
-export async function getOrderEvents(orderId: string) {
+export async function getOrderEvents(
+  restaurantId: string,
+  branchId: string,
+  orderId: string,
+) {
   const sql = getSql();
   const rows = await sql`
-    select id, order_id, status, note, created_at
-    from order_events
-    where order_id = ${orderId}
-    order by created_at desc
+    select oe.id, oe.order_id, oe.status, oe.note, oe.created_at
+    from order_events oe
+    inner join orders o on o.id = oe.order_id
+    where oe.order_id = ${orderId} and o.restaurant_id = ${restaurantId} and o.branch_id = ${branchId}
+    order by oe.created_at desc
   `;
   return rows.map(
     (row) =>
@@ -757,8 +1031,14 @@ export async function getOrderEvents(orderId: string) {
   );
 }
 
-export async function acknowledgeKitchenOrder(orderId: string) {
+export async function acknowledgeKitchenOrder(
+  restaurantId: string,
+  branchId: string,
+  orderId: string,
+) {
   return updateOrder(
+    restaurantId,
+    branchId,
     orderId,
     {
       kitchenAcknowledgedAt: now(),
@@ -768,14 +1048,22 @@ export async function acknowledgeKitchenOrder(orderId: string) {
   );
 }
 
-export async function setConversationStep(phone: string, step: ConversationStep) {
-  return updateConversation(phone, { step });
+export async function setConversationStep(
+  restaurantId: string,
+  branchId: string,
+  phone: string,
+  step: ConversationStep,
+) {
+  return updateConversation(restaurantId, branchId, phone, { step });
 }
 
-export async function ensureDemoDataIfNeeded() {
+export async function ensureDemoDataIfNeeded(
+  restaurantId = DEFAULT_RESTAURANT_ID,
+  branchId = DEFAULT_BRANCH_ID,
+) {
   if (process.env.SEED_DEMO_DATA === "false") return;
-  const stats = await getDemoStats();
+  const stats = await getDemoStats(restaurantId, branchId);
   if (stats.orderCount === 0) {
-    await resetDemoData();
+    await resetDemoData(restaurantId, branchId);
   }
 }

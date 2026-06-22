@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { BranchSwitcher } from "@/components/BranchSwitcher";
 import { DemoModeBanner, EmptyOrdersState } from "@/components/DemoModeBanner";
+import { useTenant } from "@/components/TenantProvider";
 import { formatOrderNumber, formatMoney } from "@/lib/format";
 import type { Order } from "@/lib/types";
 
@@ -22,6 +24,8 @@ function playKitchenBell() {
 }
 
 export function KitchenDisplay() {
+  const { config, branch } = useTenant();
+  const currency = config?.currency ?? "PKR";
   const [orders, setOrders] = useState<Order[]>([]);
   const seenOrders = useRef<Set<string>>(new Set());
 
@@ -65,9 +69,15 @@ export function KitchenDisplay() {
 
   return (
     <div className="min-h-screen bg-stone-950 px-4 py-8 text-stone-50">
-      <header className="mb-8">
-        <h1 className="text-4xl font-bold">Kitchen Display</h1>
-        <p className="text-stone-400">New confirmed orders appear here with a bell alert</p>
+      <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-4xl font-bold">Kitchen Display</h1>
+          <p className="text-stone-400">
+            New confirmed orders appear here with a bell alert
+            {branch ? ` · ${branch.name}` : ""}
+          </p>
+        </div>
+        <BranchSwitcher />
       </header>
 
       <DemoModeBanner />
@@ -102,7 +112,7 @@ export function KitchenDisplay() {
             <div className="mb-4 text-sm text-stone-300">
               {order.deliveryAddress ? <p>Deliver: {order.deliveryAddress}</p> : null}
               {order.pickupTime ? <p>Pickup: {order.pickupTime}</p> : null}
-              <p>Total: {formatMoney(order.totalCents)}</p>
+              <p>Total: {formatMoney(order.totalCents, currency)}</p>
             </div>
 
             {order.status === "confirmed" ? (

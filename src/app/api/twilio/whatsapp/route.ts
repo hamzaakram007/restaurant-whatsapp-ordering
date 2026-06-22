@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 import { handleCustomerMessage } from "@/lib/conversation-engine";
+import { resolveTwilioTarget } from "@/lib/tenant-context";
 import {
   parseTwilioForm,
   twimlMessages,
@@ -39,16 +40,26 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const { params, message } = await parseTwilioForm(request);
+  const target = await resolveTwilioTarget(message.To);
 
-  if (!validateTwilioSignature(request, params)) {
+  if (!target) {
+    return new Response("Unknown tenant", { status: 404 });
+  }
+
+  const restaurantId = target.restaurant.id;
+
+  if (!validateTwilioSignature(request, params, target.restaurant)) {
     return new Response("Forbidden", { status: 403 });
   }
 
   const result = await handleCustomerMessage({
+    restaurantId,
     customerPhone: message.From,
     body: message.Body,
     mediaUrl: message.NumMedia > 0 ? message.MediaUrl0 : undefined,
     mediaContentType: message.MediaContentType0,
+    branchId: target.kind === "central" ? undefined : target.branch?.id,
+    isCentralLine: target.kind === "central",
   });
 
   if (result.messages.length === 0) {

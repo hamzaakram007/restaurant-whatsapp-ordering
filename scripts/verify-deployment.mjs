@@ -1,4 +1,6 @@
 const baseUrl = (process.env.BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
+const tenantSlug = process.env.DEFAULT_TENANT_SLUG ?? "brew-bite";
+const tenantQuery = `?tenant=${encodeURIComponent(tenantSlug)}`;
 
 async function check(path) {
   const response = await fetch(`${baseUrl}${path}`, { cache: "no-store" });
@@ -16,10 +18,10 @@ async function main() {
   const checks = [
     await check("/"),
     await check("/api/health"),
-    await check("/api/demo/status"),
-    await check("/api/orders"),
+    await check(`/api/demo/status${tenantQuery}`),
+    await check(`/api/orders${tenantQuery}`),
     await check("/api/twilio/whatsapp"),
-    await check("/api/twilio/setup"),
+    await check(`/api/twilio/setup${tenantQuery}`),
   ];
 
   for (const result of checks) {
@@ -39,7 +41,7 @@ async function main() {
     console.warn("Warning: DATABASE_URL not configured on deployment (using in-memory demo mode).");
   }
 
-  const twilioSetup = checks.find((result) => result.path === "/api/twilio/setup")?.json;
+  const twilioSetup = checks.find((result) => result.path.startsWith("/api/twilio/setup"))?.json;
   if (!twilioSetup?.twilioConfigured) {
     console.warn("Warning: Twilio credentials not configured. Set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN for live WhatsApp demo.");
   }
