@@ -22,21 +22,19 @@ async function main() {
 
   await client.connect();
   try {
-    const schemaPath = path.join(neonDir, "schema.sql");
-    if (fs.existsSync(schemaPath)) {
-      await client.query(fs.readFileSync(schemaPath, "utf8"));
-      console.log("Applied schema.sql");
+    if (!fs.existsSync(migrationsDir)) {
+      console.log("No migrations directory — skipping.");
+      return;
     }
 
-    if (fs.existsSync(migrationsDir)) {
-      const migrationFiles = fs
-        .readdirSync(migrationsDir)
-        .filter((file) => file.endsWith(".sql"))
-        .sort();
-      for (const file of migrationFiles) {
-        await client.query(fs.readFileSync(path.join(migrationsDir, file), "utf8"));
-        console.log(`Applied migrations/${file}`);
-      }
+    const migrationFiles = fs
+      .readdirSync(migrationsDir)
+      .filter((file) => file.endsWith(".sql"))
+      .sort();
+
+    for (const file of migrationFiles) {
+      await client.query(fs.readFileSync(path.join(migrationsDir, file), "utf8"));
+      console.log(`Applied migrations/${file}`);
     }
 
     console.log("Deploy migrations completed.");
