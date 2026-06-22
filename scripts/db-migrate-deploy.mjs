@@ -36,17 +36,14 @@ async function bootstrapAppliedMigrations(client) {
   const existing = await client.query("select filename from schema_migrations");
   if (existing.rowCount > 0) return;
 
-  const branches = await client.query(`
-    select 1 from information_schema.tables
-    where table_schema = 'public' and table_name = 'branches'
+  const optionGroups = await client.query(`
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'menu_items' and column_name = 'option_groups'
     limit 1
   `);
-  if (branches.rowCount > 0) {
-    for (const file of ["002_menu_option_groups.sql", "003_multi_tenant.sql", "004_branches.sql"]) {
-      await recordMigration(client, file);
-    }
-    console.log("Bootstrapped schema_migrations for existing branch-enabled database.");
-    return;
+  if (optionGroups.rowCount > 0) {
+    await recordMigration(client, "002_menu_option_groups.sql");
+    console.log("Bootstrapped 002_menu_option_groups.sql");
   }
 
   const multiTenant = await client.query(`
@@ -55,10 +52,18 @@ async function bootstrapAppliedMigrations(client) {
     limit 1
   `);
   if (multiTenant.rowCount > 0) {
-    for (const file of ["002_menu_option_groups.sql", "003_multi_tenant.sql"]) {
-      await recordMigration(client, file);
-    }
-    console.log("Bootstrapped schema_migrations for existing multi-tenant database.");
+    await recordMigration(client, "003_multi_tenant.sql");
+    console.log("Bootstrapped 003_multi_tenant.sql");
+  }
+
+  const branches = await client.query(`
+    select 1 from information_schema.tables
+    where table_schema = 'public' and table_name = 'branches'
+    limit 1
+  `);
+  if (branches.rowCount > 0) {
+    await recordMigration(client, "004_branches.sql");
+    console.log("Bootstrapped 004_branches.sql");
   }
 }
 
