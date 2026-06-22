@@ -91,7 +91,7 @@ export function parseTenantSlugFromRequest(request: Request) {
   }
 
   const parts = hostname.split(".");
-  if (parts.length >= 3) return parts[0] ?? null;
+  if (parts.length >= 3 && !hostname.endsWith(".vercel.app")) return parts[0] ?? null;
   return null;
 }
 

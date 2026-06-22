@@ -14,6 +14,7 @@ export function isApexHost(hostname: string) {
 export function extractSubdomain(hostname: string) {
   const host = hostname.split(":")[0]?.toLowerCase() ?? "";
   if (host === "localhost" || host === "127.0.0.1") return null;
+  if (host.endsWith(".vercel.app")) return null;
   const platformRoot = PLATFORM_HOST.split(":")[0]?.toLowerCase() ?? "";
   if (host === platformRoot || host === `www.${platformRoot}`) return null;
   if (host.endsWith(`.${platformRoot}`)) {

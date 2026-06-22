@@ -31,8 +31,8 @@ export function proxy(request: NextRequest) {
 
   const subdomain = extractSubdomain(host);
   const tenantSlug =
-    subdomain ??
     request.nextUrl.searchParams.get("tenant") ??
+    subdomain ??
     (hostname === "localhost" || hostname === "127.0.0.1"
       ? process.env.DEFAULT_TENANT_SLUG ?? DEFAULT_RESTAURANT_SLUG
       : null);
