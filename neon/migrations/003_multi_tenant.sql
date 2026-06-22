@@ -92,7 +92,8 @@ alter table conversations alter column restaurant_id set not null;
 alter table carts alter column restaurant_id set not null;
 alter table orders alter column restaurant_id set not null;
 
--- Drop old global uniques
+-- Drop old global uniques / keys (drop dependent FKs before parent PKs)
+alter table menu_items drop constraint if exists menu_items_category_id_fkey;
 alter table customers drop constraint if exists customers_phone_key;
 alter table conversations drop constraint if exists conversations_customer_phone_key;
 alter table orders drop constraint if exists orders_order_number_key;
@@ -106,6 +107,8 @@ alter table conversations add constraint conversations_restaurant_phone_key uniq
 alter table orders add constraint orders_restaurant_order_number_key unique (restaurant_id, order_number);
 alter table menu_categories add constraint menu_categories_pkey primary key (restaurant_id, id);
 alter table menu_items add constraint menu_items_pkey primary key (restaurant_id, id);
+alter table menu_items add constraint menu_items_category_fkey
+  foreign key (restaurant_id, category_id) references menu_categories(restaurant_id, id);
 alter table carts add constraint carts_pkey primary key (restaurant_id, customer_phone);
 
 -- Per-restaurant order number sequence

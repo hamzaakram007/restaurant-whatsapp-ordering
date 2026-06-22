@@ -33,9 +33,6 @@ async function recordMigration(client, filename) {
 }
 
 async function bootstrapAppliedMigrations(client) {
-  const existing = await client.query("select filename from schema_migrations");
-  if (existing.rowCount > 0) return;
-
   const optionGroups = await client.query(`
     select 1 from information_schema.columns
     where table_schema = 'public' and table_name = 'menu_items' and column_name = 'option_groups'
@@ -43,17 +40,20 @@ async function bootstrapAppliedMigrations(client) {
   `);
   if (optionGroups.rowCount > 0) {
     await recordMigration(client, "002_menu_option_groups.sql");
-    console.log("Bootstrapped 002_menu_option_groups.sql");
   }
 
+  const restaurants = await client.query(`
+    select 1 from information_schema.tables
+    where table_schema = 'public' and table_name = 'restaurants'
+    limit 1
+  `);
   const multiTenant = await client.query(`
     select 1 from information_schema.columns
     where table_schema = 'public' and table_name = 'orders' and column_name = 'restaurant_id'
     limit 1
   `);
-  if (multiTenant.rowCount > 0) {
+  if (restaurants.rowCount > 0 || multiTenant.rowCount > 0) {
     await recordMigration(client, "003_multi_tenant.sql");
-    console.log("Bootstrapped 003_multi_tenant.sql");
   }
 
   const branches = await client.query(`
@@ -63,8 +63,9 @@ async function bootstrapAppliedMigrations(client) {
   `);
   if (branches.rowCount > 0) {
     await recordMigration(client, "004_branches.sql");
-    console.log("Bootstrapped 004_branches.sql");
   }
+
+  console.log("Reconciled schema_migrations with current database state.");
 }
 
 async function main() {
