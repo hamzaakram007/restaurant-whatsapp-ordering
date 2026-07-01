@@ -29,16 +29,22 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  const tenantFromQuery = request.nextUrl.searchParams.get("tenant");
+  const tenantFromCookie = request.cookies.get("rwo_tenant")?.value ?? null;
   const subdomain = extractSubdomain(host);
   const tenantSlug =
-    request.nextUrl.searchParams.get("tenant") ??
+    tenantFromQuery ??
     subdomain ??
+    tenantFromCookie ??
     (hostname === "localhost" || hostname === "127.0.0.1"
       ? process.env.DEFAULT_TENANT_SLUG ?? DEFAULT_RESTAURANT_SLUG
-      : null);
+      : process.env.DEMO_MODE === "true"
+        ? process.env.DEFAULT_TENANT_SLUG ?? DEFAULT_RESTAURANT_SLUG
+        : null);
 
+  const branchFromQuery = request.nextUrl.searchParams.get("branch");
   const branchSlug =
-    request.nextUrl.searchParams.get("branch") ??
+    branchFromQuery ??
     request.cookies.get("rwo_branch")?.value ??
     DEFAULT_BRANCH_SLUG;
 
@@ -73,9 +79,33 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  return NextResponse.next({
+  return nextWithTenantCookies(request, requestHeaders);
+}
+
+function applyTenantCookies(
+  response: NextResponse,
+  tenant: string | null,
+  branch: string | null,
+) {
+  const cookieOptions = {
+    path: "/",
+    maxAge: 60 * 60 * 24 * 30,
+    sameSite: "lax" as const,
+  };
+  if (tenant) response.cookies.set("rwo_tenant", tenant, cookieOptions);
+  if (branch) response.cookies.set("rwo_branch", branch, cookieOptions);
+  return response;
+}
+
+function nextWithTenantCookies(request: NextRequest, requestHeaders: Headers) {
+  const response = NextResponse.next({
     request: { headers: requestHeaders },
   });
+  return applyTenantCookies(
+    response,
+    request.nextUrl.searchParams.get("tenant"),
+    request.nextUrl.searchParams.get("branch"),
+  );
 }
 
 export const config = {

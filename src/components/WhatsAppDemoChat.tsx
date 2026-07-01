@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DEMO_CHAT_PHONE, DEMO_PAYMENT_SCREENSHOT_URL } from "@/data/demo-seed";
 import { useTenant } from "@/components/TenantProvider";
+import { withTenantQuery } from "@/lib/client-tenant-query";
 
 type ChatMessage = {
   id: string;
@@ -15,7 +16,7 @@ type ChatMessage = {
 const quickActions = ["menu", "cart", "checkout", "track", "help"];
 
 export function WhatsAppDemoChat() {
-  const { config, loading } = useTenant();
+  const { config, loading, error: tenantError } = useTenant();
   const restaurantName = config?.name ?? "Restaurant";
   const welcomeMessage = useMemo<ChatMessage | null>(
     () =>
@@ -63,7 +64,7 @@ export function WhatsAppDemoChat() {
     setSending(true);
 
     try {
-      const response = await fetch("/api/simulate", {
+      const response = await fetch(withTenantQuery("/api/simulate"), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -72,6 +73,10 @@ export function WhatsAppDemoChat() {
           mediaUrl,
         }),
       });
+      if (!response.ok) {
+        const data = (await response.json()) as { error?: string };
+        throw new Error(data.error ?? "Demo bot request failed");
+      }
       const data = (await response.json()) as {
         messages: { body: string; mediaUrl?: string }[];
       };
@@ -84,13 +89,16 @@ export function WhatsAppDemoChat() {
       }));
 
       setThread((current) => [...current, ...botMessages]);
-    } catch {
+    } catch (error) {
       setThread((current) => [
         ...current,
         {
           id: `error-${++messageIdRef.current}`,
           role: "bot",
-          body: "Could not reach the demo bot. Make sure the dev server is running.",
+          body:
+            error instanceof Error
+              ? error.message
+              : "Could not reach the demo bot. Add ?tenant=brew-bite to the URL on Vercel.",
         },
       ]);
     } finally {
@@ -100,7 +108,7 @@ export function WhatsAppDemoChat() {
   }
 
   async function resetChat() {
-    await fetch("/api/demo/reset-chat", { method: "POST" });
+    await fetch(withTenantQuery("/api/demo/reset-chat"), { method: "POST" });
     setThread([
       {
         id: "welcome-reset",
@@ -126,13 +134,13 @@ export function WhatsAppDemoChat() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Link
-            href="/dashboard"
+            href={withTenantQuery("/dashboard")}
             className="rounded-xl border border-stone-200 bg-white px-4 py-2 text-sm font-medium"
           >
             Counter
           </Link>
           <Link
-            href="/kitchen"
+            href={withTenantQuery("/kitchen")}
             className="rounded-xl border border-stone-200 bg-white px-4 py-2 text-sm font-medium"
           >
             Kitchen
@@ -146,6 +154,16 @@ export function WhatsAppDemoChat() {
           </button>
         </div>
       </header>
+
+      {tenantError ? (
+        <p className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          {tenantError}. Open{" "}
+          <Link href="/demo?tenant=brew-bite" className="font-medium underline">
+            /demo?tenant=brew-bite
+          </Link>{" "}
+          on this deployment.
+        </p>
+      ) : null}
 
       <div className="grid flex-1 gap-6 lg:grid-cols-[320px_1fr]">
         <aside className="rounded-3xl border border-stone-200 bg-white p-5">

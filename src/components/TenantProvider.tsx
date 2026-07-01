@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { withTenantQuery } from "@/lib/client-tenant-query";
 import type { Branch, BranchConfig, Restaurant, RestaurantConfig } from "@/lib/types";
 
 type TenantState = {
@@ -38,12 +39,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
 
   const load = useCallback(async () => {
     try {
-      const branchParam =
-        typeof window !== "undefined"
-          ? new URLSearchParams(window.location.search).get("branch")
-          : null;
-      const url = branchParam ? `/api/tenant?branch=${encodeURIComponent(branchParam)}` : "/api/tenant";
-      const response = await fetch(url, { cache: "no-store" });
+      const response = await fetch(withTenantQuery("/api/tenant"), { cache: "no-store" });
       if (!response.ok) {
         const data = (await response.json()) as { error?: string };
         setState({

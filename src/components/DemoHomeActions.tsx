@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { withTenantQuery } from "@/lib/client-tenant-query";
 
 type DemoStatus = {
   demoMode: boolean;
@@ -18,7 +19,7 @@ export function DemoHomeActions() {
   const [reseeding, setReseeding] = useState(false);
 
   const loadStatus = useCallback(async () => {
-    const response = await fetch("/api/demo/status", { cache: "no-store" });
+    const response = await fetch(withTenantQuery("/api/demo/status"), { cache: "no-store" });
     if (response.ok) {
       setStatus((await response.json()) as DemoStatus);
     }
@@ -33,7 +34,7 @@ export function DemoHomeActions() {
 
   async function reseedDemo() {
     setReseeding(true);
-    await fetch("/api/demo/seed", { method: "POST" });
+    await fetch(withTenantQuery("/api/demo/seed"), { method: "POST" });
     await loadStatus();
     setReseeding(false);
   }
@@ -68,7 +69,7 @@ export function DemoHomeActions() {
 
       <div className="flex flex-wrap gap-3">
         <Link
-          href="/demo"
+          href={withTenantQuery("/demo")}
           className="rounded-2xl bg-[#075e54] px-6 py-3 text-sm font-semibold text-white"
         >
           Start WhatsApp Demo
